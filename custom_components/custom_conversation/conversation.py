@@ -31,7 +31,8 @@ from homeassistant.helpers import device_registry as dr, intent, llm, template
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import ulid
 
-from . import CustomConversationConfigEntry, CustomLLMAPI, IntentTool
+from . import CustomConversationConfigEntry
+from .api import CustomLLMAPI, IntentTool
 from .const import (
     CONF_CHAT_MODEL,
     CONF_MAX_TOKENS,
