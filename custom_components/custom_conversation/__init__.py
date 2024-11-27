@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+from enum import Enum
 from functools import cache, partial
+from typing import Any
 
 import openai
 import slugify as unicode_slug
@@ -15,8 +18,16 @@ from homeassistant.components.intent import async_device_supports_timers
 from homeassistant.components.script import DOMAIN as SCRIPT_DOMAIN
 from homeassistant.components.weather import INTENT_GET_WEATHER
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_API_KEY, Platform
+from homeassistant.const import (
+    ATTR_DOMAIN,
+    ATTR_SERVICE,
+    CONF_API_KEY,
+    EVENT_HOMEASSISTANT_CLOSE,
+    EVENT_SERVICE_REMOVED,
+    Platform,
+)
 from homeassistant.core import (
+    Event,
     HomeAssistant,
     ServiceCall,
     ServiceResponse,
@@ -33,14 +44,17 @@ from homeassistant.helpers import (
     area_registry as ar,
     config_validation as cv,
     device_registry as dr,
+    entity_registry as er,
     floor_registry as fr,
     intent,
     llm,
     selector,
+    service,
 )
 from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.util import yaml
+from homeassistant.util.hass_dict import HassKey
 from homeassistant.util.json import JsonObjectType
 
 from .const import CONF_BASE_URL, DOMAIN, LLM_API_ID, LOGGER
@@ -48,6 +62,9 @@ from .const import CONF_BASE_URL, DOMAIN, LLM_API_ID, LOGGER
 SERVICE_GENERATE_IMAGE = "generate_image"
 PLATFORMS = (Platform.CONVERSATION,)
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+SCRIPT_PARAMETERS_CACHE: HassKey[dict[str, tuple[str | None, vol.Schema]]] = HassKey(
+    "llm_script_parameters_cache"
+)
 
 type CustomConversationConfigEntry = ConfigEntry[openai.AsyncClient]
 
@@ -145,6 +162,168 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
+def _get_cached_script_parameters(
+    hass: HomeAssistant, entity_id: str
+) -> tuple[str | None, vol.Schema]:
+    """Get script description and schema."""
+    entity_registry = er.async_get(hass)
+
+    description = None
+    parameters = vol.Schema({})
+    entity_entry = entity_registry.async_get(entity_id)
+    if entity_entry and entity_entry.unique_id:
+        parameters_cache = hass.data.get(SCRIPT_PARAMETERS_CACHE)
+
+        if parameters_cache is None:
+            parameters_cache = hass.data[SCRIPT_PARAMETERS_CACHE] = {}
+
+            @callback
+            def clear_cache(event: Event) -> None:
+                """Clear script parameter cache on script reload or delete."""
+                if (
+                    event.data[ATTR_DOMAIN] == SCRIPT_DOMAIN
+                    and event.data[ATTR_SERVICE] in parameters_cache
+                ):
+                    parameters_cache.pop(event.data[ATTR_SERVICE])
+
+            cancel = hass.bus.async_listen(EVENT_SERVICE_REMOVED, clear_cache)
+
+            @callback
+            def on_homeassistant_close(event: Event) -> None:
+                """Cleanup."""
+                cancel()
+
+            hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_CLOSE, on_homeassistant_close
+            )
+
+        if entity_entry.unique_id in parameters_cache:
+            return parameters_cache[entity_entry.unique_id]
+
+        if service_desc := service.async_get_cached_service_description(
+            hass, SCRIPT_DOMAIN, entity_entry.unique_id
+        ):
+            description = service_desc.get("description")
+            schema: dict[vol.Marker, Any] = {}
+            fields = service_desc.get("fields", {})
+
+            for field, config in fields.items():
+                field_description = config.get("description")
+                if not field_description:
+                    field_description = config.get("name")
+                key: vol.Marker
+                if config.get("required"):
+                    key = vol.Required(field, description=field_description)
+                else:
+                    key = vol.Optional(field, description=field_description)
+                if "selector" in config:
+                    schema[key] = selector.selector(config["selector"])
+                else:
+                    schema[key] = cv.string
+
+            parameters = vol.Schema(schema)
+
+            aliases: list[str] = []
+            if entity_entry.name:
+                aliases.append(entity_entry.name)
+            if entity_entry.aliases:
+                aliases.extend(entity_entry.aliases)
+            if aliases:
+                if description:
+                    description = description + ". Aliases: " + str(list(aliases))
+                else:
+                    description = "Aliases: " + str(list(aliases))
+
+            parameters_cache[entity_entry.unique_id] = (description, parameters)
+
+    return description, parameters
+
+
+def _get_exposed_entities(
+    hass: HomeAssistant, assistant: str
+) -> dict[str, dict[str, Any]]:
+    """Get exposed entities."""
+    area_registry = ar.async_get(hass)
+    entity_registry = er.async_get(hass)
+    device_registry = dr.async_get(hass)
+    interesting_attributes = {
+        "temperature",
+        "current_temperature",
+        "temperature_unit",
+        "brightness",
+        "humidity",
+        "unit_of_measurement",
+        "device_class",
+        "current_position",
+        "percentage",
+        "volume_level",
+        "media_title",
+        "media_artist",
+        "media_album_name",
+    }
+
+    entities = {}
+
+    for state in hass.states.async_all():
+        if not async_should_expose(hass, assistant, state.entity_id):
+            continue
+
+        description: str | None = None
+        if state.domain == SCRIPT_DOMAIN:
+            description, parameters = _get_cached_script_parameters(
+                hass, state.entity_id
+            )
+            if parameters.schema:  # Only list scripts without input fields here
+                continue
+
+        entity_entry = entity_registry.async_get(state.entity_id)
+        names = [state.name]
+        area_names = []
+
+        if entity_entry is not None:
+            names.extend(entity_entry.aliases)
+            if entity_entry.area_id and (
+                area := area_registry.async_get_area(entity_entry.area_id)
+            ):
+                # Entity is in area
+                area_names.append(area.name)
+                area_names.extend(area.aliases)
+            elif entity_entry.device_id and (
+                device := device_registry.async_get(entity_entry.device_id)
+            ):
+                # Check device area
+                if device.area_id and (
+                    area := area_registry.async_get_area(device.area_id)
+                ):
+                    area_names.append(area.name)
+                    area_names.extend(area.aliases)
+
+        info: dict[str, Any] = {
+            "names": ", ".join(names),
+            "domain": state.domain,
+            "state": state.state,
+        }
+
+        if description:
+            info["description"] = description
+
+        if area_names:
+            info["areas"] = ", ".join(area_names)
+
+        if attributes := {
+            attr_name: str(attr_value)
+            if isinstance(attr_value, (Enum, Decimal, int))
+            else attr_value
+            for attr_name, attr_value in state.attributes.items()
+            if attr_name in interesting_attributes
+        }:
+            info["attributes"] = attributes
+
+        entities[state.entity_id] = info
+
+    return entities
+
+
 class CustomLLMAPI(llm.API):
     """An API for the Custom Conversation integration to use to call Home Assistant services."""
 
@@ -172,7 +351,7 @@ class CustomLLMAPI(llm.API):
     ) -> llm.APIInstance:
         """Return an instance of the Custom Conversation LLM API."""
         if llm_context.assistant:
-            exposed_entities: dict | None = llm._get_exposed_entities(
+            exposed_entities: dict | None = _get_exposed_entities(
                 self.hass, llm_context.assistant
             )
         else:
