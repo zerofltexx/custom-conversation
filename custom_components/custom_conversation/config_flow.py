@@ -31,6 +31,8 @@ from homeassistant.helpers.typing import VolDictType
 from .const import (
     CONF_BASE_URL,
     CONF_CHAT_MODEL,
+    CONF_ENABLE_HASS_AGENT,
+    CONF_ENABLE_LLM_AGENT,
     CONF_MAX_TOKENS,
     CONF_PROMPT,
     CONF_RECOMMENDED,
@@ -58,6 +60,8 @@ RECOMMENDED_OPTIONS = {
     CONF_RECOMMENDED: True,
     CONF_LLM_HASS_API: LLM_API_ID,
     CONF_PROMPT: llm.DEFAULT_INSTRUCTIONS_PROMPT,
+    CONF_ENABLE_HASS_AGENT: True,
+    CONF_ENABLE_LLM_AGENT: True,
 }
 
 
@@ -217,6 +221,14 @@ def custom_conversation_config_option_schema(
                 description={"suggested_value": options.get(CONF_TEMPERATURE)},
                 default=RECOMMENDED_TEMPERATURE,
             ): NumberSelector(NumberSelectorConfig(min=0, max=2, step=0.05)),
+            vol.Required(
+                CONF_ENABLE_HASS_AGENT,
+                default=True,
+            ): bool,
+            vol.Required(
+                CONF_ENABLE_LLM_AGENT,
+                default=True,
+            ): bool,
         }
     )
     return schema

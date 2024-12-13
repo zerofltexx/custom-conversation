@@ -35,6 +35,9 @@ from . import CustomConversationConfigEntry
 from .api import CustomLLMAPI, IntentTool
 from .const import (
     CONF_CHAT_MODEL,
+    CONF_ENABLE_HASS_AGENT,
+    CONF_ENABLE_LLM_AGENT,
+    HOME_ASSISTANT_AGENT,
     CONF_MAX_TOKENS,
     CONF_PROMPT,
     CONF_TEMPERATURE,
@@ -50,7 +53,6 @@ from .const import (
 
 # Max number of back and forth with the LLM to generate a response
 MAX_TOOL_ITERATIONS = 10
-LOCAL_INTENT_AGENT = "homeassistant"
 
 
 async def async_setup_entry(
@@ -125,7 +127,45 @@ class CustomConversationEntity(
     async def async_process(
         self, user_input: conversation.ConversationInput
     ) -> conversation.ConversationResult:
-        """Process a sentence."""
+        """Process enabled agents started with the built in agent."""
+        intent_response = intent.IntentResponse(language=user_input.language)
+        intent_response.async_set_error(
+            intent.IntentResponseErrorCode.UNKNOWN,
+            "Sorry, there are no enabled Agents",
+        )
+        result = conversation.ConversationResult(
+            response=intent_response, conversation_id=user_input.conversation_id
+        )
+
+        if self.entry.options.get(CONF_ENABLE_HASS_AGENT):
+            result = await self._async_process_hass(user_input)
+            if result.response.error_code is None:
+                return result
+
+        if self.entry.options.get(CONF_ENABLE_LLM_AGENT):
+            result = await self._async_process_llm(user_input)
+        return result
+
+    async def _async_process_hass(
+        self, user_input: conversation.ConversationInput
+    ) -> conversation.ConversationResult:
+        """Process a sentence with the Home Assistant agent."""
+        hass_agent = conversation.async_get_agent(self.hass, HOME_ASSISTANT_AGENT)
+        if hass_agent is None:
+            intent_response = intent.IntentResponse(language=user_input.language)
+            intent_response.async_set_error(
+                intent.IntentResponseErrorCode.UNKNOWN,
+                "Sorry, I had a problem talking to Home Assistant",
+            )
+            return conversation.ConversationResult(
+                response=intent_response, conversation_id=user_input.conversation_id
+            )
+        return await hass_agent.async_process(user_input)
+
+    async def _async_process_llm(
+        self, user_input: conversation.ConversationInput
+    ) -> conversation.ConversationResult:
+        """Process a sentence with the llm."""
         options = self.entry.options
         intent_response = intent.IntentResponse(language=user_input.language)
         llm_api: CustomLLMAPI | None = None
