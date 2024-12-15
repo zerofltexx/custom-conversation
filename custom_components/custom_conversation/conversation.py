@@ -37,12 +37,14 @@ from .const import (
     CONF_CHAT_MODEL,
     CONF_ENABLE_HASS_AGENT,
     CONF_ENABLE_LLM_AGENT,
-    HOME_ASSISTANT_AGENT,
     CONF_MAX_TOKENS,
     CONF_PROMPT,
     CONF_TEMPERATURE,
     CONF_TOP_P,
+    CONVERSATION_ENDED_EVENT,
+    CONVERSATION_STARTED_EVENT,
     DOMAIN,
+    HOME_ASSISTANT_AGENT,
     LLM_API_ID,
     LOGGER,
     RECOMMENDED_CHAT_MODEL,
@@ -128,6 +130,16 @@ class CustomConversationEntity(
         self, user_input: conversation.ConversationInput
     ) -> conversation.ConversationResult:
         """Process enabled agents started with the built in agent."""
+        event_data = {
+            "agent_id": user_input.agent_id,
+            "conversation_id": user_input.conversation_id,
+            "language": user_input.language,
+            "device_id": user_input.device_id,
+            "text": user_input.text,
+            "user_id": user_input.context.user_id,
+        }
+
+        self.hass.bus.async_fire(CONVERSATION_STARTED_EVENT, event_data)
         intent_response = intent.IntentResponse(language=user_input.language)
         intent_response.async_set_error(
             intent.IntentResponseErrorCode.UNKNOWN,
@@ -140,10 +152,17 @@ class CustomConversationEntity(
         if self.entry.options.get(CONF_ENABLE_HASS_AGENT):
             result = await self._async_process_hass(user_input)
             if result.response.error_code is None:
+                await self._async_fire_conversation_ended(
+                    result, HOME_ASSISTANT_AGENT, user_input
+                )
                 return result
 
         if self.entry.options.get(CONF_ENABLE_LLM_AGENT):
-            result = await self._async_process_llm(user_input)
+            result, llm_data = await self._async_process_llm(user_input)
+            if result.response.error_code is None:
+                await self._async_fire_conversation_ended(
+                    result, "LLM", user_input, llm_data
+                )
         return result
 
     async def _async_process_hass(
@@ -164,7 +183,7 @@ class CustomConversationEntity(
 
     async def _async_process_llm(
         self, user_input: conversation.ConversationInput
-    ) -> conversation.ConversationResult:
+    ) -> tuple[conversation.ConversationResult, dict]:
         """Process a sentence with the llm."""
         options = self.entry.options
         intent_response = intent.IntentResponse(language=user_input.language)
@@ -179,6 +198,7 @@ class CustomConversationEntity(
             assistant=conversation.DOMAIN,
             device_id=user_input.device_id,
         )
+        llm_details = {}
 
         if options.get(CONF_LLM_HASS_API):
             try:
@@ -340,19 +360,19 @@ class CustomConversationEntity(
                     tool_name=tool_call.function.name,
                     tool_args=json.loads(tool_call.function.arguments),
                 )
+                tool_call_data = {
+                    "tool_name": tool_call.function.name,
+                    "tool_args": tool_call.function.arguments,
+                }
                 LOGGER.debug(
                     "Tool call: %s(%s)", tool_input.tool_name, tool_input.tool_args
                 )
 
                 try:
                     tool_response = await llm_api.async_call_tool(tool_input)
-                    # If the tool response has a card, and the current llm_context has a device_id, create a card_requested event and remove the card from the response
-                    if tool_response.get("card") and llm_context.device_id:
-                        await self._async_fire_card_requested_event(
-                            conversation_id,
-                            llm_context.device_id,
-                            tool_response["card"],
-                        )
+                    # Save a copy of the tool response, but then delete any card data to save tokens
+                    tool_call_data["tool_response"] = tool_response
+                    if tool_response.get("card"):
                         del tool_response["card"]
                 except (HomeAssistantError, vol.Invalid) as e:
                     tool_response = {"error": type(e).__name__}
@@ -367,6 +387,9 @@ class CustomConversationEntity(
                         content=json.dumps(tool_response),
                     )
                 )
+                if "tool_calls" not in llm_details:
+                    llm_details["tool_calls"] = []
+                llm_details["tool_calls"].append(tool_call_data)
 
         self.history[conversation_id] = messages
 
@@ -374,7 +397,7 @@ class CustomConversationEntity(
         intent_response.async_set_speech(response.content or "")
         return conversation.ConversationResult(
             response=intent_response, conversation_id=conversation_id
-        )
+        ), llm_details
 
     async def _async_entry_update_listener(
         self, hass: HomeAssistant, entry: ConfigEntry
@@ -395,3 +418,39 @@ class CustomConversationEntity(
                 "card": card,
             },
         )
+
+    async def _async_fire_conversation_ended(
+        self,
+        result: dict,
+        agent: str,
+        user_input: conversation.ConversationInput,
+        llm_data: dict | None = None,
+    ) -> None:
+        """Fire an event to notify that a conversation has completed."""
+        event_data = {
+            "agent_id": user_input.agent_id,
+            "handling_agent": agent,
+            "device_id": user_input.device_id,
+            "request": user_input.text,
+            "result": result.as_dict(),
+        }
+        if llm_data:
+            # If there's any card in the llm_data, we attach one to the response
+            if any(
+                "card" in tool_call["tool_response"]
+                for tool_call in llm_data.get("tool_calls", [])
+            ):
+                event_data["result"]["response"]["card"] = choose_card(
+                    llm_data["tool_calls"]
+                )
+            event_data["llm_data"] = llm_data
+        self.hass.bus.async_fire(CONVERSATION_ENDED_EVENT, event_data)
+
+
+def choose_card(tool_calls):
+    """Choose the most likely card from the tool calls."""
+    # It's possible that multiple tools have requested cards, but we only want to show one. For now, we'll choose the last tool call that has a card respose.
+    tool_calls = [
+        tool_call for tool_call in tool_calls if "card" in tool_call["tool_response"]
+    ]
+    return tool_calls[-1]["tool_response"]["card"]
