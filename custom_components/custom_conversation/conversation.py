@@ -370,8 +370,8 @@ class CustomConversationEntity(
 
                 try:
                     tool_response = await llm_api.async_call_tool(tool_input)
-                    # Save a copy of the tool response, but then delete any card data to save tokens
-                    tool_call_data["tool_response"] = tool_response
+                    # Save a copy of the tool response before deleting any card data to save tokens
+                    tool_call_data["tool_response"] = tool_response.copy()
                     if tool_response.get("card"):
                         del tool_response["card"]
                 except (HomeAssistantError, vol.Invalid) as e:
