@@ -130,6 +130,7 @@ class CustomConversationEntity(
         self, user_input: conversation.ConversationInput
     ) -> conversation.ConversationResult:
         """Process enabled agents started with the built in agent."""
+        LOGGER.debug("Processing user input: %s", user_input)
         event_data = {
             "agent_id": user_input.agent_id,
             "conversation_id": user_input.conversation_id,
@@ -150,7 +151,9 @@ class CustomConversationEntity(
         )
 
         if self.entry.options.get(CONF_ENABLE_HASS_AGENT):
+            LOGGER.debug("Processing with Home Assistant agent")
             result = await self._async_process_hass(user_input)
+            LOGGER.debug("Received response: %s", result.response.speech)
             if result.response.error_code is None:
                 await self._async_fire_conversation_ended(
                     result, HOME_ASSISTANT_AGENT, user_input
@@ -158,7 +161,9 @@ class CustomConversationEntity(
                 return result
 
         if self.entry.options.get(CONF_ENABLE_LLM_AGENT):
+            LOGGER.debug("Processing with LLM agent")
             result, llm_data = await self._async_process_llm(user_input)
+            LOGGER.debug("Received response: %s", result.response.speech)
             if result.response.error_code is None:
                 await self._async_fire_conversation_ended(
                     result, "LLM", user_input, llm_data
