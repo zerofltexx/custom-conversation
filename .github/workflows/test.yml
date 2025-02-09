@@ -25,6 +25,8 @@ jobs:
         pipenv install --dev
 
     - name: Run tests
+      env: 
+        PYTHONPATH: ${{ github.workspace }}
       run: |
         pipenv run pytest tests/ -v --cov-branch --cov-report=xml --junitxml=junit.xml -o junit_family=legacy
 
