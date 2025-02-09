@@ -27,6 +27,14 @@ def hass(hass: HomeAssistant) -> HomeAssistant:
 @pytest.fixture
 def config_entry(hass: HomeAssistant) -> MockConfigEntry:
     """Create a mock config entry."""
-    entry = MockConfigEntry(domain=DOMAIN, options={CONF_RECOMMENDED: True})
+    entry = MockConfigEntry(
+        title="Test",
+        domain=DOMAIN,
+        data={
+           "api_key": "test-api-key",
+           "base_url": "https://api.openai.com/v1",
+        },
+        options={CONF_RECOMMENDED: True}
+    )
     entry.add_to_hass(hass)
     return entry
