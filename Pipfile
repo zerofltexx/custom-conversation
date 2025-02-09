@@ -1,0 +1,24 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+openai = "*"
+hassil = "*"
+home-assistant-intents = "*"
+mutagen = "*"
+ha-ffmpeg = "*"
+pymicro-vad = "*"
+pyspeex-noise = "*"
+
+[dev-packages]
+pytest = "*"
+pytest-homeassistant-custom-component = "*"
+pytest-cov = "*"
+pytest-asyncio = "*"
+homeassistant = "*"
+
+[requires]
+python_version = "3.12"
+python_full_version = "3.12.3"
