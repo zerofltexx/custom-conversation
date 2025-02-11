@@ -449,6 +449,14 @@ class CustomConversationEntity(
                     llm_data["tool_calls"]
                 )
             event_data["llm_data"] = llm_data
+            # If any of the tool calls has data matching intent entities, we attach it to the response
+            data_dict = {"targets": [], "success": [], "failed": []}
+            for tool_call in llm_data.get("tool_calls", []):
+                tool_response = tool_call.get("tool_response", {}).get("data", {})
+                for field in ("targets", "success", "failed"):
+                    if values := tool_response.get(field, False):
+                        data_dict[field].extend(values)
+            event_data["result"]["response"]["data"].update(data_dict)
         self.hass.bus.async_fire(CONVERSATION_ENDED_EVENT, event_data)
 
 
