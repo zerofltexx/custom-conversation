@@ -34,9 +34,11 @@ from homeassistant.util import ulid
 from . import CustomConversationConfigEntry
 from .api import CustomLLMAPI, IntentTool
 from .const import (
+    CONF_AGENTS_SECTION,
     CONF_CHAT_MODEL,
     CONF_ENABLE_HASS_AGENT,
     CONF_ENABLE_LLM_AGENT,
+    CONF_LLM_PARAMETERS_SECTION,
     CONF_MAX_TOKENS,
     CONF_PROMPT,
     CONF_TEMPERATURE,
@@ -150,7 +152,7 @@ class CustomConversationEntity(
             response=intent_response, conversation_id=user_input.conversation_id
         )
 
-        if self.entry.options.get(CONF_ENABLE_HASS_AGENT):
+        if self.entry.options.get(CONF_AGENTS_SECTION, {}).get(CONF_ENABLE_HASS_AGENT):
             LOGGER.debug("Processing with Home Assistant agent")
             result = await self._async_process_hass(user_input)
             LOGGER.debug("Received response: %s", result.response.speech)
@@ -160,7 +162,7 @@ class CustomConversationEntity(
                 )
                 return result
 
-        if self.entry.options.get(CONF_ENABLE_LLM_AGENT):
+        if self.entry.options.get(CONF_AGENTS_SECTION, {}).get(CONF_ENABLE_LLM_AGENT):
             LOGGER.debug("Processing with LLM agent")
             result, llm_data = await self._async_process_llm(user_input)
             LOGGER.debug("Received response: %s", result.response.speech)
@@ -205,11 +207,11 @@ class CustomConversationEntity(
         )
         llm_details = {}
 
-        if options.get(CONF_LLM_HASS_API):
+        if llm_api := options.get(CONF_LLM_HASS_API):
             try:
                 llm_api = await llm.async_get_api(
                     self.hass,
-                    LLM_API_ID,
+                    llm_api,
                     llm_context,
                 )
             except HomeAssistantError as err:
@@ -306,12 +308,20 @@ class CustomConversationEntity(
         for _iteration in range(MAX_TOOL_ITERATIONS):
             try:
                 result = await client.chat.completions.create(
-                    model=options.get(CONF_CHAT_MODEL, RECOMMENDED_CHAT_MODEL),
+                    model=options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
+                        CONF_CHAT_MODEL, RECOMMENDED_CHAT_MODEL
+                    ),
                     messages=messages,
                     tools=tools or NOT_GIVEN,
-                    max_tokens=options.get(CONF_MAX_TOKENS, RECOMMENDED_MAX_TOKENS),
-                    top_p=options.get(CONF_TOP_P, RECOMMENDED_TOP_P),
-                    temperature=options.get(CONF_TEMPERATURE, RECOMMENDED_TEMPERATURE),
+                    max_tokens=options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
+                        CONF_MAX_TOKENS, RECOMMENDED_MAX_TOKENS
+                    ),
+                    top_p=options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
+                        CONF_TOP_P, RECOMMENDED_TOP_P
+                    ),
+                    temperature=options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
+                        CONF_TEMPERATURE, RECOMMENDED_TEMPERATURE
+                    ),
                     user=conversation_id,
                     extra_body={"metadata": {"log_raw_request": True}},
                 )
