@@ -5,7 +5,7 @@ from homeassistant.setup import async_setup_component, setup_component
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry, MockEntity, MockEntityPlatform
 
-from custom_components.custom_conversation.const import DOMAIN, CONF_RECOMMENDED
+from custom_components.custom_conversation.const import DOMAIN
 
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations):
@@ -34,7 +34,7 @@ def config_entry(hass: HomeAssistant) -> MockConfigEntry:
            "api_key": "test-api-key",
            "base_url": "https://api.openai.com/v1",
         },
-        options={CONF_RECOMMENDED: True}
+        options={}
     )
     entry.add_to_hass(hass)
     return entry

@@ -5,11 +5,12 @@ import logging
 DOMAIN = "custom_conversation"
 LOGGER = logging.getLogger(__package__)
 
-CONF_RECOMMENDED = "recommended"
 CONF_PROMPT = "prompt"
 CONF_CHAT_MODEL = "chat_model"
 CONF_ENABLE_HASS_AGENT = "enable_home_assistant_agent"
 CONF_ENABLE_LLM_AGENT = "enable_llm_agent"
+CONF_AGENTS_SECTION = "agents"
+CONF_LLM_PARAMETERS_SECTION = "llm_parameters"
 RECOMMENDED_CHAT_MODEL = "gpt-4o-mini"
 CONF_MAX_TOKENS = "max_tokens"
 RECOMMENDED_MAX_TOKENS = 150
