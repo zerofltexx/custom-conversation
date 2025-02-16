@@ -3,9 +3,13 @@ from unittest.mock import patch
 
 from custom_components.custom_conversation.const import (
     CONF_AGENTS_SECTION,
+    CONF_IGNORED_INTENTS_SECTION,
+    CONF_IGNORED_INTENTS,
     CONF_CHAT_MODEL,
     CONF_ENABLE_HASS_AGENT,
     CONF_ENABLE_LLM_AGENT,
+    CONF_IGNORED_INTENTS,
+    CONF_IGNORED_INTENTS_SECTION,
     CONF_LLM_PARAMETERS_SECTION,
     CONF_MAX_TOKENS,
     CONF_PROMPT,
@@ -83,6 +87,9 @@ async def test_options_flow(hass: HomeAssistant, config_entry):
             user_input={
                 CONF_PROMPT: "test-prompt",
                 CONF_LLM_HASS_API: "none",
+                CONF_IGNORED_INTENTS_SECTION: {
+                    CONF_IGNORED_INTENTS: ["HassGetState"],
+                },
                 CONF_AGENTS_SECTION: {
                     CONF_ENABLE_HASS_AGENT: True,
                     CONF_ENABLE_LLM_AGENT: False,
@@ -100,6 +107,7 @@ async def test_options_flow(hass: HomeAssistant, config_entry):
         assert result["data"][CONF_PROMPT] == "test-prompt"
         assert CONF_LLM_HASS_API not in result["data"]
         assert "agents" in result["data"]
+        assert result["data"][CONF_IGNORED_INTENTS_SECTION][CONF_IGNORED_INTENTS] == ["HassGetState"]
         assert result["data"][CONF_AGENTS_SECTION][CONF_ENABLE_HASS_AGENT] is True
         assert result["data"][CONF_AGENTS_SECTION][CONF_ENABLE_LLM_AGENT] is False
         assert result["data"][CONF_LLM_PARAMETERS_SECTION][CONF_CHAT_MODEL] == "test-chat-model"
@@ -126,6 +134,9 @@ async def test_options_flow_empty_fields_reset(hass: HomeAssistant, config_entry
             result["flow_id"],
             user_input={
                 CONF_LLM_HASS_API: "none",
+                CONF_IGNORED_INTENTS_SECTION: {
+                    CONF_IGNORED_INTENTS: [],
+                },
                 CONF_AGENTS_SECTION: {
                     CONF_ENABLE_HASS_AGENT: True,
                     CONF_ENABLE_LLM_AGENT: False,
@@ -142,9 +153,52 @@ async def test_options_flow_empty_fields_reset(hass: HomeAssistant, config_entry
         assert result["data"][CONF_PROMPT] == llm.DEFAULT_INSTRUCTIONS_PROMPT.strip()
         assert CONF_LLM_HASS_API not in result["data"]
         assert "agents" in result["data"]
+        assert result["data"][CONF_IGNORED_INTENTS_SECTION][CONF_IGNORED_INTENTS] == llm.AssistAPI.IGNORE_INTENTS
         assert result["data"][CONF_AGENTS_SECTION][CONF_ENABLE_HASS_AGENT] is True
         assert result["data"][CONF_AGENTS_SECTION][CONF_ENABLE_LLM_AGENT] is False
         assert result["data"][CONF_LLM_PARAMETERS_SECTION][CONF_CHAT_MODEL] == RECOMMENDED_CHAT_MODEL
         assert result["data"][CONF_LLM_PARAMETERS_SECTION][CONF_MAX_TOKENS] == 50
         assert result["data"][CONF_LLM_PARAMETERS_SECTION][CONF_TOP_P] == 0.5
         assert result["data"][CONF_LLM_PARAMETERS_SECTION][CONF_TEMPERATURE] == 0.5
+
+async def test_options_flow_ignored_intents(hass: HomeAssistant, config_entry):
+    """Test config flow options with ignored intents."""
+    
+    config_entry.add_to_hass(hass)
+    with patch(
+        "custom_components.custom_conversation.async_setup", return_value=True
+    ), patch(
+        "custom_components.custom_conversation.async_setup_entry",
+        return_value=True,
+    ), patch(
+        "homeassistant.helpers.intent.async_get",
+        return_value=[
+            type("Intent", (), {"intent_type": "HassTurnOn"}),
+            type("Intent", (), {"intent_type": "HassTurnOff"}),
+        ],
+    ):
+        result = await hass.config_entries.options.async_init(config_entry.entry_id)
+        assert result["type"] == FlowResultType.FORM
+        assert result["step_id"] == "init"
+        
+        test_intents = ["HassTurnOn", "HassTurnOff"]
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                CONF_IGNORED_INTENTS_SECTION: {
+                    CONF_IGNORED_INTENTS: test_intents,
+                },
+                CONF_AGENTS_SECTION: {
+                    CONF_ENABLE_HASS_AGENT: True,
+                    CONF_ENABLE_LLM_AGENT: True,
+                },
+                CONF_LLM_PARAMETERS_SECTION: {
+                    CONF_CHAT_MODEL: RECOMMENDED_CHAT_MODEL,
+                    CONF_MAX_TOKENS: RECOMMENDED_MAX_TOKENS,
+                    CONF_TOP_P: RECOMMENDED_TOP_P,
+                    CONF_TEMPERATURE: RECOMMENDED_TEMPERATURE,
+                }
+            },
+        )
+        assert result["type"] == FlowResultType.CREATE_ENTRY
+        assert result["data"][CONF_IGNORED_INTENTS_SECTION][CONF_IGNORED_INTENTS] == test_intents

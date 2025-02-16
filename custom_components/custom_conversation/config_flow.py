@@ -18,7 +18,7 @@ from homeassistant.config_entries import (
 from homeassistant.const import CONF_API_KEY, CONF_LLM_HASS_API
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import section
-from homeassistant.helpers import llm
+from homeassistant.helpers import intent, llm
 from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
@@ -35,6 +35,8 @@ from .const import (
     CONF_CHAT_MODEL,
     CONF_ENABLE_HASS_AGENT,
     CONF_ENABLE_LLM_AGENT,
+    CONF_IGNORED_INTENTS,
+    CONF_IGNORED_INTENTS_SECTION,
     CONF_LLM_PARAMETERS_SECTION,
     CONF_MAX_TOKENS,
     CONF_PROMPT,
@@ -57,10 +59,11 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_BASE_URL, default=RECOMMENDED_BASE_URL): str,
     }
 )
+DEFAULT_IGNORED_INTENTS = llm.AssistAPI.IGNORE_INTENTS
 
 RECOMMENDED_OPTIONS = {
     CONF_LLM_HASS_API: LLM_API_ID,
-    CONF_PROMPT: llm.DEFAULT_INSTRUCTIONS_PROMPT,   
+    CONF_PROMPT: llm.DEFAULT_INSTRUCTIONS_PROMPT,
     CONF_AGENTS_SECTION: {
         CONF_ENABLE_HASS_AGENT: True,
         CONF_ENABLE_LLM_AGENT: True,
@@ -70,14 +73,16 @@ RECOMMENDED_OPTIONS = {
         CONF_MAX_TOKENS: RECOMMENDED_MAX_TOKENS,
         CONF_TOP_P: RECOMMENDED_TOP_P,
         CONF_TEMPERATURE: RECOMMENDED_TEMPERATURE,
-    }
+    },
+    CONF_IGNORED_INTENTS: DEFAULT_IGNORED_INTENTS,
 }
 
+
 def custom_conversation_config_option_schema(
-        hass: HomeAssistant,
-        options: dict[str, Any] | MappingProxyType[str, Any],
+    hass: HomeAssistant,
+    options: dict[str, Any] | MappingProxyType[str, Any],
 ) -> vol.Schema:
-    """ Return a Schema for Custom Conversation Options."""
+    """Return a Schema for Custom Conversation Options."""
     hass_apis: list[SelectOptionDict] = [
         SelectOptionDict(
             label="No control",
@@ -91,6 +96,19 @@ def custom_conversation_config_option_schema(
         )
         for api in llm.async_get_apis(hass)
     )
+
+    # Get the recommended list of ignored intents from the default API
+    hass_recommended_ignored = llm.AssistAPI.IGNORE_INTENTS
+
+    intents: list[SelectOptionDict] = [
+        {
+            "value": intent.intent_type,
+            "label": f"{intent.intent_type} (Hass Recommended)"
+            if intent.intent_type in hass_recommended_ignored
+            else intent.intent_type,
+        }
+        for intent in intent.async_get(hass)
+    ]
 
     # Basic options that are always shown
     schema: VolDictType = {
@@ -108,17 +126,36 @@ def custom_conversation_config_option_schema(
             description={"suggested_value": options.get(CONF_LLM_HASS_API)},
             default="none",
         ): SelectSelector(SelectSelectorConfig(options=hass_apis)),
+        # Add ignored intents selector
+        vol.Required(CONF_IGNORED_INTENTS_SECTION): section(
+            vol.Schema(
+                {
+                    vol.Required(
+                        CONF_IGNORED_INTENTS,
+                        default=options.get(CONF_IGNORED_INTENTS_SECTION, {}).get(
+                            CONF_IGNORED_INTENTS, DEFAULT_IGNORED_INTENTS
+                        ) 
+                    ): SelectSelector(
+                        SelectSelectorConfig(options=intents, multiple=True)
+                    ),
+                }
+            )
+        ),
         # Agent section
         vol.Required(CONF_AGENTS_SECTION): section(
             vol.Schema(
                 {
                     vol.Required(
                         CONF_ENABLE_HASS_AGENT,
-                        default=options.get("agents", {}).get(CONF_ENABLE_HASS_AGENT, True),
+                        default=options.get("agents", {}).get(
+                            CONF_ENABLE_HASS_AGENT, True
+                        ),
                     ): bool,
                     vol.Required(
                         CONF_ENABLE_LLM_AGENT,
-                        default=options.get("agents", {}).get(CONF_ENABLE_LLM_AGENT, True),
+                        default=options.get("agents", {}).get(
+                            CONF_ENABLE_LLM_AGENT, True
+                        ),
                     ): bool,
                 }
             )
@@ -152,6 +189,7 @@ def custom_conversation_config_option_schema(
     }
 
     return schema
+
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
     """Validate the user input allows us to connect.
@@ -220,6 +258,13 @@ class CustomConversationOptionsFlow(OptionsFlow):
         if user_input is not None:
             if user_input[CONF_LLM_HASS_API] == "none":
                 user_input.pop(CONF_LLM_HASS_API)
+            # If the ignored intents are an empty list, use the defaults
+            if not user_input.get(CONF_IGNORED_INTENTS_SECTION, {}).get(
+                CONF_IGNORED_INTENTS
+            ):
+                user_input[CONF_IGNORED_INTENTS_SECTION][CONF_IGNORED_INTENTS] = (
+                    DEFAULT_IGNORED_INTENTS
+                )
             return self.async_create_entry(title="", data=user_input)
 
         schema = custom_conversation_config_option_schema(self.hass, options)

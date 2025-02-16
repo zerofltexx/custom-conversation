@@ -25,6 +25,13 @@
           "prompt": "Instruct how the LLM should respond. This can be a template."
         },
         "sections": {
+          "ignored_intents_section": {
+            "name": "Ignored Intents",
+            "description": "Configure which intents should be ignored by the Custom LLM API.\nThose recommended by the current Home Assistant version are marked.",
+            "data": {
+              "ignored_intents": "Ignored Intents"
+            }
+          },
           "agents": {
             "name": "Custom LLM API Agents",
             "description": "Configure which agents are enabled for the Custom LLM API.\nEnabling both will try to resolve intents locally first,\nand then fall back to the configured LLM.",
