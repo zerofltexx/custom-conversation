@@ -38,23 +38,15 @@ from homeassistant.util import yaml
 from homeassistant.util.hass_dict import HassKey
 from homeassistant.util.json import JsonObjectType
 
-from .const import LLM_API_ID
+from .const import (
+    CONF_IGNORED_INTENTS,
+    DOMAIN,
+    LLM_API_ID,
+)
 
 
 class CustomLLMAPI(llm.API):
     """An API for the Custom Conversation integration to use to call Home Assistant services."""
-
-    IGNORE_INTENTS = {
-        INTENT_GET_TEMPERATURE,
-        INTENT_GET_WEATHER,
-        INTENT_OPEN_COVER,  # deprecated
-        INTENT_CLOSE_COVER,  # deprecated
-        intent.INTENT_GET_STATE,
-        intent.INTENT_NEVERMIND,
-        intent.INTENT_TOGGLE,
-        intent.INTENT_GET_CURRENT_DATE,
-        intent.INTENT_GET_CURRENT_TIME,
-    }
 
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialize the API."""
@@ -62,6 +54,7 @@ class CustomLLMAPI(llm.API):
         self.cached_slugify = cache(
             partial(unicode_slug.slugify, separator="_", lowercase=False)
         )
+        self._hass = hass
 
     async def async_get_api_instance(
         self, llm_context: llm.LLMContext
@@ -144,7 +137,15 @@ class CustomLLMAPI(llm.API):
         self, llm_context: llm.LLMContext, exposed_entities: dict | None
     ) -> list[llm.Tool]:
         """Return a list of LLM tools."""
-        ignore_intents = self.IGNORE_INTENTS
+        # Get config entry
+        entry = next(
+            entry for entry in self._hass.config_entries.async_entries(DOMAIN)
+            if entry.entry_id == llm_context.config_entry_id
+        )
+
+        # Get ignored intents from options, fallback to defaults
+        ignore_intents = set(entry.options.get(CONF_IGNORED_INTENTS, llm.AssistAPI.IGNORE_INTENTS))
+
         if not llm_context.device_id or not async_device_supports_timers(
             self.hass, llm_context.device_id
         ):

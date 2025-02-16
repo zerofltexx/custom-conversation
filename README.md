@@ -1,9 +1,10 @@
 # Custom Conversation
-My very customized version of Conversation Agent for Home Assistant. Based on the original OpenAI component, this project provides a conversation component and an LLM API that differ from the original in a few key areas:
+A very customizable version of Conversation Agent for Home Assistant. Based on the original OpenAI component, this project provides a conversation component and an LLM API that differ from the original in a few key areas:
 * It takes a baseurl, so that any OpenAI API-compatible LLM can be used.
 * It retains the "card" parameter from intent scripts. The internal LLM API deletes this from tool call responses, in order to save on tokens sent to the LLM. This project removes it from future interactions with the LLM specifically, but retains it so that it can be published with events.
 * It publishes conversation started and ended events, along with the card of any tools called, to the home assistant event bus.
 * If the internal Home Assistant agent is enabled in the component's configuration, it will attempt to resolve requests using the local intent matching system first, and then fall back to the LLM. While Home Assistant does now provide the option for fallback itself, leaving that disabled and enabling the fallback in this component enables the same functionality while retaining equivalent behavior regardless of whether the request is handled by an LLM - an event is published either way, and it indicates how the request was handled.
+* The list of built-in intents to not expose to the LLM is configurable - allowing users to bypass the built-in list (although keep in mind, those intents were probably i gnored for a reason), or add additional ones.
 
 
 Example event from a request handled by the LLM:
