@@ -137,14 +137,15 @@ class CustomLLMAPI(llm.API):
         self, llm_context: llm.LLMContext, exposed_entities: dict | None
     ) -> list[llm.Tool]:
         """Return a list of LLM tools."""
-        # Get config entry
-        entry = next(
-            entry for entry in self._hass.config_entries.async_entries(DOMAIN)
-            if entry.entry_id == llm_context.config_entry_id
+        originating_entity = llm_context.context.origin_event.data.get("entity_id")
+        entity_registry = er.async_get(self.hass)
+        config_entry = self.hass.config_entries.async_get_entry(
+            entity_registry.async_get(originating_entity).config_entry_id
         )
-
         # Get ignored intents from options, fallback to defaults
-        ignore_intents = set(entry.options.get(CONF_IGNORED_INTENTS, llm.AssistAPI.IGNORE_INTENTS))
+        ignore_intents = config_entry.options.get(
+            CONF_IGNORED_INTENTS, llm.AssistAPI.IGNORE_INTENTS
+        )
 
         if not llm_context.device_id or not async_device_supports_timers(
             self.hass, llm_context.device_id
