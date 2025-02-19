@@ -3,6 +3,14 @@ from unittest.mock import patch
 
 from custom_components.custom_conversation.const import (
     CONF_AGENTS_SECTION,
+    CONF_CUSTOM_PROMPTS_SECTION,
+    CONF_PROMPT_BASE,
+    CONF_PROMPT_NO_ENABLED_ENTITIES,
+    CONF_API_PROMPT_BASE,
+    CONF_PROMPT_DEVICE_KNOWN_LOCATION,
+    CONF_PROMPT_DEVICE_UNKNOWN_LOCATION,
+    CONF_PROMPT_TIMERS_UNSUPPORTED,
+    CONF_PROMPT_EXPOSED_ENTITIES,
     CONF_IGNORED_INTENTS_SECTION,
     CONF_IGNORED_INTENTS,
     CONF_CHAT_MODEL,
@@ -12,9 +20,17 @@ from custom_components.custom_conversation.const import (
     CONF_IGNORED_INTENTS_SECTION,
     CONF_LLM_PARAMETERS_SECTION,
     CONF_MAX_TOKENS,
-    CONF_PROMPT,
+    CONF_INSTRUCTIONS_PROMPT,
     CONF_TEMPERATURE,
     CONF_TOP_P,
+    DEFAULT_BASE_PROMPT,
+    DEFAULT_PROMPT_NO_ENABLED_ENTITIES,
+    DEFAULT_INSTRUCTIONS_PROMPT,
+    DEFAULT_API_PROMPT_BASE,
+    DEFAULT_API_PROMPT_DEVICE_KNOWN_LOCATION,
+    DEFAULT_API_PROMPT_DEVICE_UNKNOWN_LOCATION,
+    DEFAULT_API_PROMPT_TIMERS_UNSUPPORTED,
+    DEFAULT_API_PROMPT_EXPOSED_ENTITIES,
     DOMAIN,
     LLM_API_ID,
     RECOMMENDED_CHAT_MODEL,
@@ -57,7 +73,7 @@ async def test_show_config_form(hass: HomeAssistant):
     assert result["data"]["api_key"] == "test-api-key"
 
     # Recommended Options should be set by default at this point
-    assert result["options"][CONF_PROMPT] == llm.DEFAULT_INSTRUCTIONS_PROMPT
+    assert result["options"][CONF_INSTRUCTIONS_PROMPT] == llm.DEFAULT_INSTRUCTIONS_PROMPT
     assert result["options"][CONF_LLM_HASS_API] == LLM_API_ID
     assert result["options"][CONF_AGENTS_SECTION][CONF_ENABLE_HASS_AGENT]
     assert result["options"][CONF_AGENTS_SECTION][CONF_ENABLE_LLM_AGENT]
@@ -85,7 +101,7 @@ async def test_options_flow(hass: HomeAssistant, config_entry):
         result = await hass.config_entries.options.async_configure(
             result["flow_id"],
             user_input={
-                CONF_PROMPT: "test-prompt",
+                CONF_INSTRUCTIONS_PROMPT: "test-prompt",
                 CONF_LLM_HASS_API: "none",
                 CONF_IGNORED_INTENTS_SECTION: {
                     CONF_IGNORED_INTENTS: ["HassGetState"],
@@ -99,12 +115,20 @@ async def test_options_flow(hass: HomeAssistant, config_entry):
                     CONF_MAX_TOKENS: 50,
                     CONF_TOP_P: 0.5,
                     CONF_TEMPERATURE: 0.5,
+                },
+                CONF_CUSTOM_PROMPTS_SECTION: {
+                    CONF_PROMPT_BASE: "test-prompt-base",
+                    CONF_PROMPT_NO_ENABLED_ENTITIES: "test-prompt-no-entities",
+                    CONF_API_PROMPT_BASE: "test-api-prompt-base",
+                    CONF_PROMPT_DEVICE_KNOWN_LOCATION: "test-prompt-known-location",
+                    CONF_PROMPT_DEVICE_UNKNOWN_LOCATION: "test-prompt-unknown-location",
+                    CONF_PROMPT_TIMERS_UNSUPPORTED: "test-prompt-timers-unsupported",
+                    CONF_PROMPT_EXPOSED_ENTITIES: "test-prompt-exposed-entities",
                 }
-
             },
         )
         assert result["type"] == FlowResultType.CREATE_ENTRY
-        assert result["data"][CONF_PROMPT] == "test-prompt"
+        assert result["data"][CONF_INSTRUCTIONS_PROMPT] == "test-prompt"
         assert CONF_LLM_HASS_API not in result["data"]
         assert "agents" in result["data"]
         assert result["data"][CONF_IGNORED_INTENTS_SECTION][CONF_IGNORED_INTENTS] == ["HassGetState"]
@@ -114,6 +138,13 @@ async def test_options_flow(hass: HomeAssistant, config_entry):
         assert result["data"][CONF_LLM_PARAMETERS_SECTION][CONF_MAX_TOKENS] == 50
         assert result["data"][CONF_LLM_PARAMETERS_SECTION][CONF_TOP_P] == 0.5
         assert result["data"][CONF_LLM_PARAMETERS_SECTION][CONF_TEMPERATURE] == 0.5
+        assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_BASE] == "test-prompt-base"
+        assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_NO_ENABLED_ENTITIES] == "test-prompt-no-entities"
+        assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_API_PROMPT_BASE] == "test-api-prompt-base"
+        assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_DEVICE_KNOWN_LOCATION] == "test-prompt-known-location"
+        assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_DEVICE_UNKNOWN_LOCATION] == "test-prompt-unknown-location"
+        assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_TIMERS_UNSUPPORTED] == "test-prompt-timers-unsupported"
+        assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_EXPOSED_ENTITIES] == "test-prompt-exposed-entities"
 
 async def test_options_flow_empty_fields_reset(hass: HomeAssistant, config_entry):
     """Test config flow options with empty fields reset to recommended."""
@@ -145,12 +176,21 @@ async def test_options_flow_empty_fields_reset(hass: HomeAssistant, config_entry
                     CONF_MAX_TOKENS: 50,
                     CONF_TOP_P: 0.5,
                     CONF_TEMPERATURE: 0.5,
+                },
+                CONF_CUSTOM_PROMPTS_SECTION: {
+                    CONF_PROMPT_BASE: "",
+                    CONF_PROMPT_NO_ENABLED_ENTITIES: "",
+                    CONF_API_PROMPT_BASE: "",
+                    CONF_PROMPT_DEVICE_KNOWN_LOCATION: "",
+                    CONF_PROMPT_DEVICE_UNKNOWN_LOCATION: "",
+                    CONF_PROMPT_TIMERS_UNSUPPORTED: "",
+                    CONF_PROMPT_EXPOSED_ENTITIES: "",
                 }
 
             },
         )
         assert result["type"] == FlowResultType.CREATE_ENTRY
-        assert result["data"][CONF_PROMPT] == llm.DEFAULT_INSTRUCTIONS_PROMPT.strip()
+        assert result["data"][CONF_INSTRUCTIONS_PROMPT] == DEFAULT_INSTRUCTIONS_PROMPT.strip()
         assert CONF_LLM_HASS_API not in result["data"]
         assert "agents" in result["data"]
         assert result["data"][CONF_IGNORED_INTENTS_SECTION][CONF_IGNORED_INTENTS] == llm.AssistAPI.IGNORE_INTENTS
@@ -160,6 +200,15 @@ async def test_options_flow_empty_fields_reset(hass: HomeAssistant, config_entry
         assert result["data"][CONF_LLM_PARAMETERS_SECTION][CONF_MAX_TOKENS] == 50
         assert result["data"][CONF_LLM_PARAMETERS_SECTION][CONF_TOP_P] == 0.5
         assert result["data"][CONF_LLM_PARAMETERS_SECTION][CONF_TEMPERATURE] == 0.5
+        assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_BASE].strip() == DEFAULT_BASE_PROMPT.strip()
+        assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_NO_ENABLED_ENTITIES] == DEFAULT_PROMPT_NO_ENABLED_ENTITIES
+        assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_API_PROMPT_BASE] == DEFAULT_API_PROMPT_BASE
+        assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_DEVICE_KNOWN_LOCATION] == DEFAULT_API_PROMPT_DEVICE_KNOWN_LOCATION
+        assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_DEVICE_UNKNOWN_LOCATION] == DEFAULT_API_PROMPT_DEVICE_UNKNOWN_LOCATION
+        assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_TIMERS_UNSUPPORTED] == DEFAULT_API_PROMPT_TIMERS_UNSUPPORTED
+        assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_EXPOSED_ENTITIES] == DEFAULT_API_PROMPT_EXPOSED_ENTITIES
+
+
 
 async def test_options_flow_ignored_intents(hass: HomeAssistant, config_entry):
     """Test config flow options with ignored intents."""
@@ -197,7 +246,8 @@ async def test_options_flow_ignored_intents(hass: HomeAssistant, config_entry):
                     CONF_MAX_TOKENS: RECOMMENDED_MAX_TOKENS,
                     CONF_TOP_P: RECOMMENDED_TOP_P,
                     CONF_TEMPERATURE: RECOMMENDED_TEMPERATURE,
-                }
+                },
+                CONF_CUSTOM_PROMPTS_SECTION: {}
             },
         )
         assert result["type"] == FlowResultType.CREATE_ENTRY

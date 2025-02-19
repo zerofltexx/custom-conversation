@@ -5,7 +5,15 @@ from homeassistant.setup import async_setup_component, setup_component
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry, MockEntity, MockEntityPlatform
 
-from custom_components.custom_conversation.const import DOMAIN
+from custom_components.custom_conversation.const import (
+    CONF_CUSTOM_PROMPTS_SECTION,
+    CONF_PROMPT_BASE,
+    CONF_INSTRUCTIONS_PROMPT,
+    CONF_API_PROMPT_BASE,
+    CONF_PROMPT_DEVICE_KNOWN_LOCATION,
+    CONF_PROMPT_NO_ENABLED_ENTITIES,
+    DOMAIN,
+)
 
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations):
@@ -34,7 +42,15 @@ def config_entry(hass: HomeAssistant) -> MockConfigEntry:
            "api_key": "test-api-key",
            "base_url": "https://api.openai.com/v1",
         },
-        options={}
+        options={
+            CONF_CUSTOM_PROMPTS_SECTION: {
+            CONF_PROMPT_BASE: "Custom base prompt for {{ ha_name }}",
+            CONF_INSTRUCTIONS_PROMPT: "Custom instructions for {{ user_name }}",
+            CONF_API_PROMPT_BASE: "Custom API base prompt",
+            CONF_PROMPT_DEVICE_KNOWN_LOCATION: "Custom location prompt for {{ location }}",
+            CONF_PROMPT_NO_ENABLED_ENTITIES: "Custom no entities prompt",
+        }
+        }
     )
     entry.add_to_hass(hass)
     return entry

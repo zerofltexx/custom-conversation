@@ -5,7 +5,6 @@ import logging
 DOMAIN = "custom_conversation"
 LOGGER = logging.getLogger(__package__)
 
-CONF_PROMPT = "prompt"
 CONF_CHAT_MODEL = "chat_model"
 CONF_ENABLE_HASS_AGENT = "enable_home_assistant_agent"
 CONF_ENABLE_LLM_AGENT = "enable_llm_agent"
@@ -26,3 +25,50 @@ LLM_API_ID = "custom-conversation"
 HOME_ASSISTANT_AGENT = "conversation.home_assistant"
 CONVERSATION_STARTED_EVENT = f"{DOMAIN}_conversation_started"
 CONVERSATION_ENDED_EVENT = f"{DOMAIN}_conversation_ended"
+
+CONF_CUSTOM_PROMPTS_SECTION = "custom_prompts"
+CONF_PROMPT_BASE = "prompt_base"
+DEFAULT_BASE_PROMPT = (
+    'Current time is {{ now().strftime("%H:%M:%S") }}. '
+    'Today\'s date is {{ now().strftime("%Y-%m-%d") }}.\n'
+)
+
+CONF_INSTRUCTIONS_PROMPT = "instructions_prompt"
+DEFAULT_INSTRUCTIONS_PROMPT = """You are a voice assistant for Home Assistant.
+Answer questions about the world truthfully.
+Answer in plain text. Keep it simple and to the point.
+"""
+
+CONF_PROMPT_NO_ENABLED_ENTITIES = "prompt_no_enabled_entities"
+DEFAULT_PROMPT_NO_ENABLED_ENTITIES = (
+    "Only if the user wants to control a device, tell them to expose entities "
+    "to their voice assistant in Home Assistant."
+)
+
+CONF_API_PROMPT_BASE = "prompt_api_base"
+DEFAULT_API_PROMPT_BASE = (
+    "When controlling Home Assistant always call the intent tools. "
+    "Use HassTurnOn to lock and HassTurnOff to unlock a lock. "
+    "When controlling a device, prefer passing just name and domain. "
+    "When controlling an area, prefer passing just area name and domain."
+)
+
+# If the user request came from a device, it may have a known location
+CONF_PROMPT_DEVICE_KNOWN_LOCATION = "prompt_device_known_location"
+DEFAULT_API_PROMPT_DEVICE_KNOWN_LOCATION = (
+    "You are in area {{ location }} and all generic commands "
+    "like 'turn on the lights' should target this area."
+)
+CONF_PROMPT_DEVICE_UNKNOWN_LOCATION = "prompt_device_unknown_location"
+DEFAULT_API_PROMPT_DEVICE_UNKNOWN_LOCATION = (
+    "When a user asks to turn on all devices of a specific type, "
+    "ask user to specify an area, unless there is only one device of that type."
+)
+
+CONF_PROMPT_TIMERS_UNSUPPORTED = "prompt_timers_unsupported"
+DEFAULT_API_PROMPT_TIMERS_UNSUPPORTED = "This device is not able to start timers."
+
+CONF_PROMPT_EXPOSED_ENTITIES = "prompt_exposed_entities"
+DEFAULT_API_PROMPT_EXPOSED_ENTITIES = (
+    "An overview of the areas and the devices in this smart home:"
+)
