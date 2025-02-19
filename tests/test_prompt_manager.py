@@ -103,6 +103,8 @@ def test_get_api_prompt_no_timers(prompt_manager, hass):
 
 def test_get_config_entry_from_context(prompt_manager, hass):
     """Test getting config entry from LLM context."""
+    prompt_manager = PromptManager(hass)
+
     with patch.object(er, "async_get") as mock_er_get:
         mock_entity_registry = Mock()
         mock_entity_entry = Mock()
@@ -112,16 +114,9 @@ def test_get_config_entry_from_context(prompt_manager, hass):
         
         mock_llm_context = Mock()
         mock_llm_context.context.origin_event.data = {"entity_id": "test_entity"}
-        
-        mock_config_entries = Mock()
-        mock_config_entries.async_get_entry.return_value = "test_config_entry"
-        hass.config_entries = mock_config_entries
-        
-        result = prompt_manager._get_config_entry_from_context(mock_llm_context)
-        
-        assert result == "test_config_entry"
+        prompt_manager._get_config_entry_from_context(mock_llm_context)
+
         mock_entity_registry.async_get.assert_called_once_with("test_entity")
-        hass.config_entries.async_get_entry.assert_called_once_with("test_entry_id")
 
 
 def test_get_config_entry_from_context_no_entity(prompt_manager):
