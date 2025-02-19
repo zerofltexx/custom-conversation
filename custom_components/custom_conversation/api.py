@@ -10,12 +10,11 @@ from typing import Any
 import slugify as unicode_slug
 import voluptuous as vol
 
-from homeassistant.components.climate import INTENT_GET_TEMPERATURE
-from homeassistant.components.cover import INTENT_CLOSE_COVER, INTENT_OPEN_COVER
+
 from homeassistant.components.homeassistant import async_should_expose
 from homeassistant.components.intent import async_device_supports_timers
 from homeassistant.components.script import DOMAIN as SCRIPT_DOMAIN
-from homeassistant.components.weather import INTENT_GET_WEATHER
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     ATTR_DOMAIN,
     ATTR_SERVICE,
@@ -38,11 +37,8 @@ from homeassistant.util import yaml
 from homeassistant.util.hass_dict import HassKey
 from homeassistant.util.json import JsonObjectType
 
-from .const import (
-    CONF_IGNORED_INTENTS,
-    DOMAIN,
-    LLM_API_ID,
-)
+from .const import CONF_IGNORED_INTENTS, LLM_API_ID
+from .prompt_manager import PromptContext, PromptManager
 
 
 class CustomLLMAPI(llm.API):
@@ -55,6 +51,7 @@ class CustomLLMAPI(llm.API):
             partial(unicode_slug.slugify, separator="_", lowercase=False)
         )
         self._hass = hass
+        self._prompt_manager = PromptManager(hass)
 
     async def async_get_api_instance(
         self, llm_context: llm.LLMContext
@@ -75,25 +72,31 @@ class CustomLLMAPI(llm.API):
             custom_serializer=llm._selector_serializer,
         )
 
+    def _get_config_entry_from_context(self, llm_context: Any) -> ConfigEntry | None:
+        if not llm_context or not llm_context.context.origin_event:
+            return None
+
+        originating_entity = llm_context.context.origin_event.data.get("entity_id")
+        if not originating_entity:
+            return None
+
+        entity_registry = er.async_get(self.hass)
+        entity_entry = entity_registry.async_get(originating_entity)
+        if not entity_entry:
+            return None
+
+        return self.hass.config_entries.async_get_entry(entity_entry.config_entry_id)
+
     @callback
     def _async_get_api_prompt(
         self, llm_context: llm.LLMContext, exposed_entities: dict | None
     ) -> str:
         """Return the prompt for the API."""
-        if not exposed_entities:
-            return (
-                "Only if the user wants to control a device, tell them to expose entities "
-                "to their voice assistant in Home Assistant."
-            )
 
-        prompt = [
-            (
-                "When controlling Home Assistant always call the intent tools. "
-                "Use HassTurnOn to lock and HassTurnOff to unlock a lock. "
-                "When controlling a device, prefer passing just name and domain. "
-                "When controlling an area, prefer passing just area name and domain."
-            )
-        ]
+        area_name = None
+        floor_name = None
+        supports_timers = False
+
         area: ar.AreaEntry | None = None
         floor: fr.FloorEntry | None = None
         if llm_context.device_id:
@@ -103,49 +106,43 @@ class CustomLLMAPI(llm.API):
             if device:
                 area_reg = ar.async_get(self.hass)
                 if device.area_id and (area := area_reg.async_get_area(device.area_id)):
+                    area_name = area.name
                     floor_reg = fr.async_get(self.hass)
-                    if area.floor_id:
-                        floor = floor_reg.async_get_floor(area.floor_id)
+                    if area.floor_id and (
+                        floor := floor_reg.async_get_floor(area.floor_id)
+                    ):
+                        floor_name = floor.name
 
-            extra = "and all generic commands like 'turn on the lights' should target this area."
-
-        if floor and area:
-            prompt.append(f"You are in area {area.name} (floor {floor.name}) {extra}")
-        elif area:
-            prompt.append(f"You are in area {area.name} {extra}")
-        else:
-            prompt.append(
-                "When a user asks to turn on all devices of a specific type, "
-                "ask user to specify an area, unless there is only one device of that type."
+            supports_timers = async_device_supports_timers(
+                self.hass, llm_context.device_id
             )
 
-        if not llm_context.device_id or not async_device_supports_timers(
-            self.hass, llm_context.device_id
-        ):
-            prompt.append("This device is not able to start timers.")
+        location = f"{area_name} (floor: {floor_name})" if floor_name else area_name
+        context = PromptContext(
+            hass=self.hass,
+            ha_name=self.hass.config.location_name,
+            llm_context=llm_context,
+            location=location,
+            exposed_entities=exposed_entities,
+            supports_timers=supports_timers,
+        )
 
-        if exposed_entities:
-            prompt.append(
-                "An overview of the areas and the devices in this smart home:"
-            )
-            prompt.append(yaml.dump(list(exposed_entities.values())))
-
-        return "\n".join(prompt)
+        config_entry = self._get_config_entry_from_context(llm_context)
+        return self._prompt_manager.get_api_prompt(context, config_entry)
 
     @callback
     def _async_get_tools(
         self, llm_context: llm.LLMContext, exposed_entities: dict | None
     ) -> list[llm.Tool]:
         """Return a list of LLM tools."""
-        originating_entity = llm_context.context.origin_event.data.get("entity_id")
-        entity_registry = er.async_get(self.hass)
-        config_entry = self.hass.config_entries.async_get_entry(
-            entity_registry.async_get(originating_entity).config_entry_id
-        )
+        config_entry = self._get_config_entry_from_context(llm_context)
         # Get ignored intents from options, fallback to defaults
-        ignore_intents = config_entry.options.get(
-            CONF_IGNORED_INTENTS, llm.AssistAPI.IGNORE_INTENTS
-        )
+        if config_entry:
+            ignore_intents = config_entry.options.get(
+                CONF_IGNORED_INTENTS, llm.AssistAPI.IGNORE_INTENTS
+            )
+        else:
+            ignore_intents = llm.AssistAPI.IGNORE_INTENTS
 
         if not llm_context.device_id or not async_device_supports_timers(
             self.hass, llm_context.device_id

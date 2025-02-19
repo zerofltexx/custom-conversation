@@ -27,7 +27,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_LLM_HASS_API, MATCH_ALL
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, TemplateError
-from homeassistant.helpers import device_registry as dr, intent, llm, template
+from homeassistant.helpers import device_registry as dr, intent, llm
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import ulid
 
@@ -40,20 +40,19 @@ from .const import (
     CONF_ENABLE_LLM_AGENT,
     CONF_LLM_PARAMETERS_SECTION,
     CONF_MAX_TOKENS,
-    CONF_PROMPT,
     CONF_TEMPERATURE,
     CONF_TOP_P,
     CONVERSATION_ENDED_EVENT,
     CONVERSATION_STARTED_EVENT,
     DOMAIN,
     HOME_ASSISTANT_AGENT,
-    LLM_API_ID,
     LOGGER,
     RECOMMENDED_CHAT_MODEL,
     RECOMMENDED_MAX_TOKENS,
     RECOMMENDED_TEMPERATURE,
     RECOMMENDED_TOP_P,
 )
+from .prompt_manager import PromptContext, PromptManager
 
 # Max number of back and forth with the LLM to generate a response
 MAX_TOOL_ITERATIONS = 10
@@ -256,22 +255,23 @@ class CustomConversationEntity(
             )
         ):
             user_name = user.name
-
+        prompt_manager = PromptManager(self.hass)
+        prompt_context = PromptContext(
+            hass=self.hass,
+            ha_name=self.hass.config.location_name,
+            user_name=user_name,
+            llm_context=llm_context,
+        )
         try:
-            prompt_parts = [
-                template.Template(
-                    llm.BASE_PROMPT
-                    + options.get(CONF_PROMPT, llm.DEFAULT_INSTRUCTIONS_PROMPT),
-                    self.hass,
-                ).async_render(
-                    {
-                        "ha_name": self.hass.config.location_name,
-                        "user_name": user_name,
-                        "llm_context": llm_context,
-                    },
-                    parse_result=False,
-                )
-            ]
+            prompt = await prompt_manager.async_get_base_prompt(
+                prompt_context, self.entry
+            )
+            prompt_parts = [prompt]
+
+            if llm_api:
+                prompt_parts.append(llm_api.api_prompt)
+
+            prompt = "\n".join(prompt_parts)
 
         except TemplateError as err:
             LOGGER.error("Error rendering prompt: %s", err)
@@ -283,11 +283,6 @@ class CustomConversationEntity(
             return conversation.ConversationResult(
                 response=intent_response, conversation_id=conversation_id
             )
-
-        if llm_api:
-            prompt_parts.append(llm_api.api_prompt)
-
-        prompt = "\n".join(prompt_parts)
 
         # Create a copy of the variable because we attach it to the trace
         messages = [

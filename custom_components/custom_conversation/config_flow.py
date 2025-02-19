@@ -26,22 +26,40 @@ from homeassistant.helpers.selector import (
     SelectSelector,
     SelectSelectorConfig,
     TemplateSelector,
+    TextSelector,
+    TextSelectorConfig,
 )
 from homeassistant.helpers.typing import VolDictType
 
 from .const import (
     CONF_AGENTS_SECTION,
+    CONF_API_PROMPT_BASE,
     CONF_BASE_URL,
     CONF_CHAT_MODEL,
+    CONF_CUSTOM_PROMPTS_SECTION,
     CONF_ENABLE_HASS_AGENT,
     CONF_ENABLE_LLM_AGENT,
     CONF_IGNORED_INTENTS,
     CONF_IGNORED_INTENTS_SECTION,
+    CONF_INSTRUCTIONS_PROMPT,
     CONF_LLM_PARAMETERS_SECTION,
     CONF_MAX_TOKENS,
-    CONF_PROMPT,
+    CONF_PROMPT_BASE,
+    CONF_PROMPT_DEVICE_KNOWN_LOCATION,
+    CONF_PROMPT_DEVICE_UNKNOWN_LOCATION,
+    CONF_PROMPT_EXPOSED_ENTITIES,
+    CONF_PROMPT_NO_ENABLED_ENTITIES,
+    CONF_PROMPT_TIMERS_UNSUPPORTED,
     CONF_TEMPERATURE,
     CONF_TOP_P,
+    DEFAULT_API_PROMPT_BASE,
+    DEFAULT_API_PROMPT_DEVICE_KNOWN_LOCATION,
+    DEFAULT_API_PROMPT_DEVICE_UNKNOWN_LOCATION,
+    DEFAULT_API_PROMPT_EXPOSED_ENTITIES,
+    DEFAULT_API_PROMPT_TIMERS_UNSUPPORTED,
+    DEFAULT_BASE_PROMPT,
+    DEFAULT_INSTRUCTIONS_PROMPT,
+    DEFAULT_PROMPT_NO_ENABLED_ENTITIES,
     DOMAIN,
     LLM_API_ID,
     RECOMMENDED_BASE_URL,
@@ -63,7 +81,7 @@ DEFAULT_IGNORED_INTENTS = llm.AssistAPI.IGNORE_INTENTS
 
 RECOMMENDED_OPTIONS = {
     CONF_LLM_HASS_API: LLM_API_ID,
-    CONF_PROMPT: llm.DEFAULT_INSTRUCTIONS_PROMPT,
+    CONF_INSTRUCTIONS_PROMPT: DEFAULT_INSTRUCTIONS_PROMPT,
     CONF_AGENTS_SECTION: {
         CONF_ENABLE_HASS_AGENT: True,
         CONF_ENABLE_LLM_AGENT: True,
@@ -75,6 +93,16 @@ RECOMMENDED_OPTIONS = {
         CONF_TEMPERATURE: RECOMMENDED_TEMPERATURE,
     },
     CONF_IGNORED_INTENTS: DEFAULT_IGNORED_INTENTS,
+    CONF_CUSTOM_PROMPTS_SECTION: {
+        CONF_PROMPT_BASE: DEFAULT_BASE_PROMPT,
+        CONF_INSTRUCTIONS_PROMPT: DEFAULT_INSTRUCTIONS_PROMPT,
+        CONF_PROMPT_NO_ENABLED_ENTITIES: DEFAULT_PROMPT_NO_ENABLED_ENTITIES,
+        CONF_API_PROMPT_BASE: DEFAULT_API_PROMPT_BASE,
+        CONF_PROMPT_DEVICE_KNOWN_LOCATION: DEFAULT_API_PROMPT_DEVICE_KNOWN_LOCATION,
+        CONF_PROMPT_DEVICE_UNKNOWN_LOCATION: DEFAULT_API_PROMPT_DEVICE_UNKNOWN_LOCATION,
+        CONF_PROMPT_TIMERS_UNSUPPORTED: DEFAULT_API_PROMPT_TIMERS_UNSUPPORTED,
+        CONF_PROMPT_EXPOSED_ENTITIES: DEFAULT_API_PROMPT_EXPOSED_ENTITIES,
+    },
 }
 
 
@@ -113,13 +141,13 @@ def custom_conversation_config_option_schema(
     # Basic options that are always shown
     schema: VolDictType = {
         vol.Optional(
-            CONF_PROMPT,
+            CONF_INSTRUCTIONS_PROMPT,
             description={
                 "suggested_value": options.get(
-                    CONF_PROMPT, llm.DEFAULT_INSTRUCTIONS_PROMPT
+                    CONF_INSTRUCTIONS_PROMPT, DEFAULT_INSTRUCTIONS_PROMPT
                 ),
             },
-            default=llm.DEFAULT_INSTRUCTIONS_PROMPT,
+            default=DEFAULT_INSTRUCTIONS_PROMPT,
         ): TemplateSelector(),
         vol.Optional(
             CONF_LLM_HASS_API,
@@ -134,7 +162,7 @@ def custom_conversation_config_option_schema(
                         CONF_IGNORED_INTENTS,
                         default=options.get(CONF_IGNORED_INTENTS_SECTION, {}).get(
                             CONF_IGNORED_INTENTS, DEFAULT_IGNORED_INTENTS
-                        ) 
+                        ),
                     ): SelectSelector(
                         SelectSelectorConfig(options=intents, multiple=True)
                     ),
@@ -183,6 +211,62 @@ def custom_conversation_config_option_schema(
                         description={"suggested_value": options.get(CONF_TEMPERATURE)},
                         default=RECOMMENDED_TEMPERATURE,
                     ): NumberSelector(NumberSelectorConfig(min=0, max=2, step=0.05)),
+                }
+            )
+        ),
+        vol.Required(CONF_CUSTOM_PROMPTS_SECTION): section(
+            vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_PROMPT_BASE,
+                        description={
+                            "suggested_value": options.get(
+                                CONF_CUSTOM_PROMPTS_SECTION, {}
+                            ).get(CONF_PROMPT_BASE, DEFAULT_BASE_PROMPT)
+                        },
+                        default=DEFAULT_BASE_PROMPT,
+                    ): TemplateSelector(),
+                    vol.Optional(
+                        CONF_PROMPT_NO_ENABLED_ENTITIES,
+                        default=options.get(CONF_CUSTOM_PROMPTS_SECTION, {}).get(
+                            CONF_PROMPT_NO_ENABLED_ENTITIES,
+                            DEFAULT_PROMPT_NO_ENABLED_ENTITIES,
+                        ),
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
+                    vol.Optional(
+                        CONF_API_PROMPT_BASE,
+                        default=options.get(CONF_CUSTOM_PROMPTS_SECTION, {}).get(
+                            CONF_API_PROMPT_BASE, DEFAULT_API_PROMPT_BASE
+                        ),
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
+                    vol.Optional(
+                        CONF_PROMPT_DEVICE_KNOWN_LOCATION,
+                        default=options.get(CONF_CUSTOM_PROMPTS_SECTION, {}).get(
+                            CONF_PROMPT_DEVICE_KNOWN_LOCATION,
+                            DEFAULT_API_PROMPT_DEVICE_KNOWN_LOCATION,
+                        ),
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
+                    vol.Optional(
+                        CONF_PROMPT_DEVICE_UNKNOWN_LOCATION,
+                        default=options.get(CONF_CUSTOM_PROMPTS_SECTION, {}).get(
+                            CONF_PROMPT_DEVICE_UNKNOWN_LOCATION,
+                            DEFAULT_API_PROMPT_DEVICE_UNKNOWN_LOCATION,
+                        ),
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
+                    vol.Optional(
+                        CONF_PROMPT_TIMERS_UNSUPPORTED,
+                        default=options.get(CONF_CUSTOM_PROMPTS_SECTION, {}).get(
+                            CONF_PROMPT_TIMERS_UNSUPPORTED,
+                            DEFAULT_API_PROMPT_TIMERS_UNSUPPORTED,
+                        ),
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
+                    vol.Optional(
+                        CONF_PROMPT_EXPOSED_ENTITIES,
+                        default=options.get(CONF_CUSTOM_PROMPTS_SECTION, {}).get(
+                            CONF_PROMPT_EXPOSED_ENTITIES,
+                            DEFAULT_API_PROMPT_EXPOSED_ENTITIES,
+                        ),
+                    ): TextSelector(TextSelectorConfig(multiline=True)),
                 }
             )
         ),
@@ -265,6 +349,14 @@ class CustomConversationOptionsFlow(OptionsFlow):
                 user_input[CONF_IGNORED_INTENTS_SECTION][CONF_IGNORED_INTENTS] = (
                     DEFAULT_IGNORED_INTENTS
                 )
+            # If any of the custom prompts are an empty string, use the default for that prompt
+            for prompt in user_input.get(CONF_CUSTOM_PROMPTS_SECTION, {}):
+                if not user_input[CONF_CUSTOM_PROMPTS_SECTION][prompt]:
+                    user_input[CONF_CUSTOM_PROMPTS_SECTION][prompt] = RECOMMENDED_OPTIONS[
+                        CONF_CUSTOM_PROMPTS_SECTION
+                    ][prompt]
+            
+
             return self.async_create_entry(title="", data=user_input)
 
         schema = custom_conversation_config_option_schema(self.hass, options)
