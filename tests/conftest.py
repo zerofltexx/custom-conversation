@@ -53,4 +53,6 @@ def config_entry(hass: HomeAssistant) -> MockConfigEntry:
         }
     )
     entry.add_to_hass(hass)
+    hass.config_entries.async_setup(entry.entry_id)
+    hass.async_block_till_done
     return entry
