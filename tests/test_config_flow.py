@@ -37,14 +37,15 @@ from custom_components.custom_conversation.const import (
     RECOMMENDED_MAX_TOKENS,
     RECOMMENDED_TEMPERATURE,
     RECOMMENDED_TOP_P,
+    CONF_BASE_URL,
 )
 
-from homeassistant.const import CONF_LLM_HASS_API
+from homeassistant.const import CONF_LLM_HASS_API, CONF_API_KEY
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import llm
 from homeassistant import config_entries
-
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
 
@@ -252,3 +253,36 @@ async def test_options_flow_ignored_intents(hass: HomeAssistant, config_entry):
         )
         assert result["type"] == FlowResultType.CREATE_ENTRY
         assert result["data"][CONF_IGNORED_INTENTS_SECTION][CONF_IGNORED_INTENTS] == test_intents
+
+
+async def test_step_reconfigure_prefills_data(hass: HomeAssistant, config_entry):
+    """Test reconfigure step prefills with existing config data."""
+
+    result = await config_entry.start_reconfigure_flow(hass)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+    # Check that the defaults are set from existing config
+    assert result["data_schema"].schema
+    api_key = next(key.default() for key in result["data_schema"].schema if key == CONF_API_KEY)
+    assert api_key == "test-api-key"
+    url = next(key.default() for key in result["data_schema"].schema if key == CONF_BASE_URL)
+    assert url == "https://api.openai.com/v1"
+
+    with patch(
+        "custom_components.custom_conversation.async_setup", return_value=True
+    ), patch(
+        "custom_components.custom_conversation.async_setup_entry",
+        return_value=True,
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_API_KEY: "new-api-key",
+                CONF_BASE_URL: "https://new-url.com",
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"

@@ -291,15 +291,10 @@ class CustomConversationConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
+    async def _validate_entry(
+        self, user_input: dict[str, Any], step_id: str
     ) -> ConfigFlowResult:
-        """Handle the initial step."""
-        if user_input is None:
-            return self.async_show_form(
-                step_id="user", data_schema=STEP_USER_DATA_SCHEMA
-            )
-
+        """Validate input and create entry if valid."""
         errors: dict[str, str] = {}
 
         try:
@@ -308,18 +303,75 @@ class CustomConversationConfigFlow(ConfigFlow, domain=DOMAIN):
             errors["base"] = "cannot_connect"
         except openai.AuthenticationError:
             errors["base"] = "invalid_auth"
-        except Exception:
+        except Exception:  # pylint: disable=broad-except
             _LOGGER.exception("Unexpected exception")
             errors["base"] = "unknown"
-        else:
-            return self.async_create_entry(
-                title="CustomConversation",
-                data=user_input,
-                options=RECOMMENDED_OPTIONS,
+        return errors
+
+    def _get_schema_with_defaults(self, step_id: str) -> vol.Schema:
+        """Get schema with defaults filled in."""
+        if step_id == "reconfigure":
+            config_entry = self._get_reconfigure_entry()
+            return vol.Schema(
+                {
+                    vol.Required(
+                        CONF_API_KEY, default=config_entry.data.get(CONF_API_KEY, "")
+                    ): str,
+                    vol.Required(
+                        CONF_BASE_URL,
+                        default=config_entry.data.get(
+                            CONF_BASE_URL, RECOMMENDED_BASE_URL
+                        ),
+                    ): str,
+                }
+            )
+        return STEP_USER_DATA_SCHEMA
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle the initial step."""
+        if user_input is None:
+            return self.async_show_form(
+                step_id="user", data_schema=self._get_schema_with_defaults("user")
             )
 
-        return self.async_show_form(
-            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+        errors = await self._validate_entry(user_input, "user")
+
+        if errors:
+            return self.async_show_form(
+                step_id="user",
+                data_schema=self._get_schema_with_defaults("user"),
+                errors=errors,
+            )
+
+        return self.async_create_entry(
+            title="CustomConversation",
+            data=user_input,
+            options=RECOMMENDED_OPTIONS,
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle reconfiguration of the integration."""
+        if user_input is None:
+            return self.async_show_form(
+                step_id="reconfigure",
+                data_schema=self._get_schema_with_defaults("reconfigure"),
+            )
+
+        errors = await self._validate_entry(user_input, "reconfigure")
+
+        if errors:
+            return self.async_show_form(
+                step_id="reconfigure",
+                data_schema=self._get_schema_with_defaults("reconfigure"),
+                errors=errors,
+            )
+
+        return self.async_update_reload_and_abort(
+            self._get_reconfigure_entry(), data_updates=user_input
         )
 
     @staticmethod
@@ -352,10 +404,9 @@ class CustomConversationOptionsFlow(OptionsFlow):
             # If any of the custom prompts are an empty string, use the default for that prompt
             for prompt in user_input.get(CONF_CUSTOM_PROMPTS_SECTION, {}):
                 if not user_input[CONF_CUSTOM_PROMPTS_SECTION][prompt]:
-                    user_input[CONF_CUSTOM_PROMPTS_SECTION][prompt] = RECOMMENDED_OPTIONS[
-                        CONF_CUSTOM_PROMPTS_SECTION
-                    ][prompt]
-            
+                    user_input[CONF_CUSTOM_PROMPTS_SECTION][prompt] = (
+                        RECOMMENDED_OPTIONS[CONF_CUSTOM_PROMPTS_SECTION][prompt]
+                    )
 
             return self.async_create_entry(title="", data=user_input)
 
