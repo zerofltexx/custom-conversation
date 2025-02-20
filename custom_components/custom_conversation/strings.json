@@ -71,6 +71,28 @@
               "prompt_timers_unsupported": "The prompt the API includes if the request comes from a device that cannot set timers.",
               "prompt_exposed_entities": "The prompt the API includes prior to the list of exposed entities and areas."
             }
+          },
+          "langfuse": {
+            "name": "Langfuse",
+            "description": "Configure the Langfuse parameters",
+            "data": {
+              "enable_langfuse": "Enable Langfuse Prompt management",
+              "base_prompt_id": "Base Prompt ID",
+              "api_prompt_id": "API Prompt ID",
+              "langfuse_host": "Langfuse Host",
+              "langfuse_public_key": "Langfuse Public Key",
+              "langfuse_secret_key": "Langfuse Secret  Key",
+              "langfuse_tracing_enabled": "Enable Langfuse Tracing"
+            },
+            "data_description": {
+              "enable_langfuse": "Enable Langfuse for prompt management",
+              "base_prompt_id": "The ID Langfuse prompt to use when the API is not enabled.\nHome assistant templating is not supported, but the variables '{{current_time}}' and '{{current_date}}', '{{ha_name}}' and '{{user_name}}' are available.",
+              "api_prompt_id": "The ID of the Langfuse  prompt to use when the custom LLM API is enabled.\nNote that because Langfuse does not currently support combining multiple prompts, this will be the only prompt sent, it will not be combined with the one above as is the case with the non-Langfuse support.\nIn addition to the above variables, '{{location}}', '{{supports_timers}}' and '{{exposed_entities}}' are available.",
+              "langfuse_host": "The host of the Langfuse API",
+              "langfuse_public_key": "The public key for the Langfuse API",
+              "langfuse_secret_key": "The secret key for the Langfuse API",
+              "langfuse_tracing_enabled": "Enable tracing for Langfuse"
+            }
           }
         }
       }

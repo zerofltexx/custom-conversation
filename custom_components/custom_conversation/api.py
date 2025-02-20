@@ -7,9 +7,9 @@ from enum import Enum
 from functools import cache, partial
 from typing import Any
 
+from langfuse.model import Prompt
 import slugify as unicode_slug
 import voluptuous as vol
-
 
 from homeassistant.components.homeassistant import async_should_expose
 from homeassistant.components.intent import async_device_supports_timers
@@ -33,7 +33,6 @@ from homeassistant.helpers import (
     selector,
     service,
 )
-from homeassistant.util import yaml
 from homeassistant.util.hass_dict import HassKey
 from homeassistant.util.json import JsonObjectType
 
@@ -44,14 +43,20 @@ from .prompt_manager import PromptContext, PromptManager
 class CustomLLMAPI(llm.API):
     """An API for the Custom Conversation integration to use to call Home Assistant services."""
 
-    def __init__(self, hass: HomeAssistant) -> None:
+    def __init__(self, hass: HomeAssistant, user_name: str | None = None) -> None:
         """Initialize the API."""
         super().__init__(hass=hass, id=LLM_API_ID, name="Custom Conversation LLM API")
         self.cached_slugify = cache(
             partial(unicode_slug.slugify, separator="_", lowercase=False)
         )
         self._hass = hass
+        self._request_user_name = user_name
         self._prompt_manager = PromptManager(hass)
+        self.prompt_object = None
+
+    def set_langfuse_client(self, langfuse_client: Any) -> None:
+        """Set the Langfuse client."""
+        self._prompt_manager.set_langfuse_client(langfuse_client)
 
     async def async_get_api_instance(
         self, llm_context: llm.LLMContext
@@ -90,7 +95,7 @@ class CustomLLMAPI(llm.API):
     @callback
     def _async_get_api_prompt(
         self, llm_context: llm.LLMContext, exposed_entities: dict | None
-    ) -> str:
+    ) -> tuple[Prompt, str] | str:
         """Return the prompt for the API."""
 
         area_name = None
@@ -121,6 +126,7 @@ class CustomLLMAPI(llm.API):
         context = PromptContext(
             hass=self.hass,
             ha_name=self.hass.config.location_name,
+            user_name=self._request_user_name,
             llm_context=llm_context,
             location=location,
             exposed_entities=exposed_entities,

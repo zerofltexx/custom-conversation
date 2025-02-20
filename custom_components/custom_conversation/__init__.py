@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import openai
+from langfuse.openai import openai
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
@@ -24,6 +24,7 @@ from homeassistant.helpers.typing import ConfigType
 
 from .api import CustomLLMAPI
 from .const import CONF_BASE_URL, DOMAIN, LLM_API_ID, LOGGER
+from .prompt_manager import LangfuseClient, LangfuseError
 
 SERVICE_GENERATE_IMAGE = "generate_image"
 PLATFORMS = (Platform.CONVERSATION,)
@@ -115,6 +116,16 @@ async def async_setup_entry(
 
     entry.runtime_data = client
 
+    langfuse_client = None
+    # initialize Langfuse client if enabled
+    try:
+        langfuse_client = await LangfuseClient.create(hass, entry)
+    except LangfuseError as err:
+        LOGGER.error("Error initializing Langfuse client: %s", err)
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][entry.entry_id] = {
+        "langfuse_client": langfuse_client,
+    }
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True

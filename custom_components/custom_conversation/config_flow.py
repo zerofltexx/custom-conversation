@@ -38,10 +38,18 @@ from .const import (
     CONF_CHAT_MODEL,
     CONF_CUSTOM_PROMPTS_SECTION,
     CONF_ENABLE_HASS_AGENT,
+    CONF_ENABLE_LANGFUSE,
     CONF_ENABLE_LLM_AGENT,
     CONF_IGNORED_INTENTS,
     CONF_IGNORED_INTENTS_SECTION,
     CONF_INSTRUCTIONS_PROMPT,
+    CONF_LANGFUSE_API_PROMPT_ID,
+    CONF_LANGFUSE_BASE_PROMPT_ID,
+    CONF_LANGFUSE_HOST,
+    CONF_LANGFUSE_PUBLIC_KEY,
+    CONF_LANGFUSE_SECRET_KEY,
+    CONF_LANGFUSE_SECTION,
+    CONF_LANGFUSE_TRACING_ENABLED,
     CONF_LLM_PARAMETERS_SECTION,
     CONF_MAX_TOKENS,
     CONF_PROMPT_BASE,
@@ -102,6 +110,15 @@ RECOMMENDED_OPTIONS = {
         CONF_PROMPT_DEVICE_UNKNOWN_LOCATION: DEFAULT_API_PROMPT_DEVICE_UNKNOWN_LOCATION,
         CONF_PROMPT_TIMERS_UNSUPPORTED: DEFAULT_API_PROMPT_TIMERS_UNSUPPORTED,
         CONF_PROMPT_EXPOSED_ENTITIES: DEFAULT_API_PROMPT_EXPOSED_ENTITIES,
+    },
+    CONF_LANGFUSE_SECTION: {
+        CONF_ENABLE_LANGFUSE: False,
+        CONF_LANGFUSE_HOST: "",
+        CONF_LANGFUSE_PUBLIC_KEY: "",
+        CONF_LANGFUSE_SECRET_KEY: "",
+        CONF_LANGFUSE_BASE_PROMPT_ID: "",
+        CONF_LANGFUSE_API_PROMPT_ID: "",
+        CONF_LANGFUSE_TRACING_ENABLED: False,
     },
 }
 
@@ -267,6 +284,55 @@ def custom_conversation_config_option_schema(
                             DEFAULT_API_PROMPT_EXPOSED_ENTITIES,
                         ),
                     ): TextSelector(TextSelectorConfig(multiline=True)),
+                }
+            )
+        ),
+        # Langfuse Section
+        vol.Required(CONF_LANGFUSE_SECTION): section(
+            vol.Schema(
+                {
+                    vol.Required(
+                        CONF_ENABLE_LANGFUSE,
+                        default=options.get(CONF_LANGFUSE_SECTION, {}).get(
+                            CONF_ENABLE_LANGFUSE, False
+                        ),
+                    ): bool,
+                    vol.Optional(
+                        CONF_LANGFUSE_HOST,
+                        default=options.get(CONF_LANGFUSE_SECTION, {}).get(
+                            CONF_LANGFUSE_HOST, ""
+                        ),
+                    ): str,
+                    vol.Optional(
+                        CONF_LANGFUSE_PUBLIC_KEY,
+                        default=options.get(CONF_LANGFUSE_SECTION, {}).get(
+                            CONF_LANGFUSE_PUBLIC_KEY, ""
+                        ),
+                    ): str,
+                    vol.Optional(
+                        CONF_LANGFUSE_SECRET_KEY,
+                        default=options.get(CONF_LANGFUSE_SECTION, {}).get(
+                            CONF_LANGFUSE_SECRET_KEY, ""
+                        ),
+                    ): str,
+                    vol.Optional(
+                        CONF_LANGFUSE_BASE_PROMPT_ID,
+                        default=options.get(CONF_LANGFUSE_SECTION, {}).get(
+                            CONF_LANGFUSE_BASE_PROMPT_ID, ""
+                        ),
+                    ): str,
+                    vol.Optional(
+                        CONF_LANGFUSE_API_PROMPT_ID,
+                        default=options.get(CONF_LANGFUSE_SECTION, {}).get(
+                            CONF_LANGFUSE_API_PROMPT_ID, ""
+                        ),
+                    ): str,
+                    vol.Optional(
+                        CONF_LANGFUSE_TRACING_ENABLED,
+                        default=options.get(CONF_LANGFUSE_SECTION, {}).get(
+                            CONF_LANGFUSE_TRACING_ENABLED, False
+                        ),
+                    ): bool,
                 }
             )
         ),
