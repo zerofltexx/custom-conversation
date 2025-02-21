@@ -132,5 +132,20 @@ async def async_setup_entry(
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload OpenAI."""
+    """Clean up clients."""
+     # Clean up Langfuse client if it exists
+    if (
+        DOMAIN in hass.data
+        and entry.entry_id in hass.data[DOMAIN]
+        and hass.data[DOMAIN][entry.entry_id].get("langfuse_client")
+    ):
+        langfuse_client = hass.data[DOMAIN][entry.entry_id]["langfuse_client"]
+        try:
+            await langfuse_client.cleanup()
+        except Exception as err:
+            LOGGER.warning("Error cleaning up Langfuse client: %s", err)
+
+    # Remove data
+    if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:
+        hass.data[DOMAIN].pop(entry.entry_id)
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
