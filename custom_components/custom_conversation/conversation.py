@@ -168,11 +168,27 @@ class CustomConversationEntity(
     ) -> conversation.ConversationResult:
         """Process enabled agents started with the built in agent."""
         LOGGER.debug("Processing user input: %s", user_input)
+        device_registry = dr.async_get(self.hass)
+        device = device_registry.async_get(user_input.device_id)
+        device_data = {
+            "device_id": user_input.device_id,
+            "device_name": device.name if device else "Unknown",
+            "device_area": device.area_id if device else "Unknown",
+        }
+        langfuse_context.update_current_trace(
+            tags=[
+                f"device_id:{user_input.device_id}",
+                f"device_name:{device_data['device_name']}",
+                f"device_area:{device_data['device_area']}",
+            ]
+        )
         event_data = {
             "agent_id": user_input.agent_id,
             "conversation_id": user_input.conversation_id,
             "language": user_input.language,
             "device_id": user_input.device_id,
+            "device_name": device_data["device_name"],
+            "device_area": device_data["device_area"],
             "text": user_input.text,
             "user_id": user_input.context.user_id,
         }
@@ -193,7 +209,7 @@ class CustomConversationEntity(
             LOGGER.debug("Received response: %s", result.response.speech)
             if result.response.error_code is None:
                 await self._async_fire_conversation_ended(
-                    result, HOME_ASSISTANT_AGENT, user_input
+                    result, HOME_ASSISTANT_AGENT, user_input, device_data
                 )
                 return result
 
@@ -203,7 +219,7 @@ class CustomConversationEntity(
             LOGGER.debug("Received response: %s", result.response.speech)
             if result.response.error_code is None:
                 await self._async_fire_conversation_ended(
-                    result, "LLM", user_input, llm_data
+                    result, "LLM", user_input, llm_data, device_data
                 )
         return result
 
@@ -494,12 +510,15 @@ class CustomConversationEntity(
         agent: str,
         user_input: conversation.ConversationInput,
         llm_data: dict | None = None,
+        device_data: dict | None = None,
     ) -> None:
         """Fire an event to notify that a conversation has completed."""
         event_data = {
             "agent_id": user_input.agent_id,
             "handling_agent": agent,
             "device_id": user_input.device_id,
+            "device_name": device_data["device_name"],
+            "device_area": device_data["device_area"],
             "request": user_input.text,
             "result": result.as_dict(),
         }
