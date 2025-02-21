@@ -517,8 +517,8 @@ class CustomConversationEntity(
             "agent_id": user_input.agent_id,
             "handling_agent": agent,
             "device_id": user_input.device_id,
-            "device_name": device_data.get("device_name", "Unknown"),
-            "device_area": device_data.get("device_area", "Unknown"),
+            "device_name": device_data.get("device_name") if device_data else "Unknown",
+            "device_area": device_data.get("device_area") if device_data else "Unknown",
             "request": user_input.text,
             "result": result.as_dict(),
         }
