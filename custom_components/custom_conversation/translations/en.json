@@ -18,8 +18,8 @@
     "step": {
       "init": {
         "data": {
-          "prompt": "Instructions",
-          "llm_hass_api": "Control Home Assistant"
+          "instructions_prompt": "Instructions",
+          "llm_hass_api": "Choose the API to expose to the LLM"
         },
         "data_description": {
           "prompt": "Instruct how the LLM should respond. This can be a template."
