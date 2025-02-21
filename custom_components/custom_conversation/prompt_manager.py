@@ -21,7 +21,9 @@ from .const import (
     CONF_ENABLE_LANGFUSE,
     CONF_INSTRUCTIONS_PROMPT,
     CONF_LANGFUSE_API_PROMPT_ID,
+    CONF_LANGFUSE_API_PROMPT_LABEL,
     CONF_LANGFUSE_BASE_PROMPT_ID,
+    CONF_LANGFUSE_BASE_PROMPT_LABEL,
     CONF_LANGFUSE_HOST,
     CONF_LANGFUSE_PUBLIC_KEY,
     CONF_LANGFUSE_SECRET_KEY,
@@ -250,10 +252,11 @@ class PromptManager:
 class LangfuseClient:
     """Client for Langfuse prompt management."""
 
-    def __init__(self, hass: HomeAssistant, client: Langfuse) -> None:
+    def __init__(self, hass: HomeAssistant, client: Langfuse, prompts: dict) -> None:
         """Initialize the client."""
         self._client = client
         self.hass = hass
+        self.prompts = prompts
 
     @classmethod
     async def create(
@@ -264,7 +267,19 @@ class LangfuseClient:
             CONF_ENABLE_LANGFUSE
         ):
             return None
-
+        # Set up prompt dictionary from config entry
+        prompts = {
+            config_entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
+                CONF_LANGFUSE_BASE_PROMPT_ID
+            ): config_entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
+                CONF_LANGFUSE_BASE_PROMPT_LABEL, "production"
+            ),
+            config_entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
+                CONF_LANGFUSE_API_PROMPT_ID
+            ): config_entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
+                CONF_LANGFUSE_API_PROMPT_LABEL, "production"
+            ),
+        }
         try:
 
             def create_client() -> Langfuse:
@@ -285,7 +300,7 @@ class LangfuseClient:
                 )
 
             client = await hass.async_add_executor_job(create_client)
-            return cls(hass, client)
+            return cls(hass, client, prompts)
         except Exception as err:
             LOGGER.error("Error initializing Langfuse client: %s", err)
             raise LangfuseInitError("Failed to initialize Langfuse client") from err
@@ -298,7 +313,9 @@ class LangfuseClient:
         try:
             # Get the prompt object in an executor
             prompt_object = await self.hass.async_add_executor_job(
-                lambda: self._client.get_prompt(prompt_id, type="chat")
+                lambda: self._client.get_prompt(
+                    prompt_id, label=self.prompts[prompt_id], type="chat"
+                )
             )
             # Compile the prompt in an executor
             compiled_prompt = prompt_object.compile(**variables)[0]["content"]
