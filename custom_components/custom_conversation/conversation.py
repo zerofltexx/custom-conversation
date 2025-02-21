@@ -254,7 +254,9 @@ class CustomConversationEntity(
         if llm_api := options.get(CONF_LLM_HASS_API):
             try:
                 if llm_api == LLM_API_ID:
-                    api_instance = CustomLLMAPI(self.hass, user_name)
+                    api_instance = CustomLLMAPI(
+                        self.hass, user_name, conversation_config_entry=self.entry
+                    )
                     if (
                         langfuse_client := self.hass.data.get(DOMAIN, {})
                         .get(self.entry.entry_id, {})

@@ -78,22 +78,6 @@ class PromptManager:
         self.hass = hass
         self._langfuse_client = None
 
-    def _get_config_entry_from_context(self, llm_context: Any) -> ConfigEntry | None:
-        """Get config entry from LLM context."""
-        if not llm_context or not llm_context.context.origin_event:
-            return None
-
-        originating_entity = llm_context.context.origin_event.data.get("entity_id")
-        if not originating_entity:
-            return None
-
-        entity_registry = er.async_get(self.hass)
-        entity_entry = entity_registry.async_get(originating_entity)
-        if not entity_entry:
-            return None
-
-        return self.hass.config_entries.async_get_entry(entity_entry.config_entry_id)
-
     def _get_prompt_config(
         self, config_entry: ConfigEntry | None, key: str, default: str
     ) -> str:
@@ -322,3 +306,13 @@ class LangfuseClient:
             LOGGER.error("Error getting Langfuse prompt: %s", err)
             raise LangfusePromptError(f"Failed to get Langfuse prompt: {err}") from err
         return prompt_object, compiled_prompt
+
+    async def cleanup(self) -> None:
+        """Clean up Langfuse client resources."""
+        if self._client:
+            try:
+                # Flush any pending data and stop the consumer thread
+                await self.hass.async_add_executor_job(self._client.flush)
+                await self.hass.async_add_executor_job(self._client.close)
+            except Exception as err:
+                LOGGER.warning("Error cleaning up Langfuse client: %s", err)
