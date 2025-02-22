@@ -246,3 +246,5 @@ This component is particularly useful for:
 - A/B testing different approaches to home automation interactions
 - Gathering real-world interaction data for further experimentation and development
 - Developing prompts in a test environment and promoting them into production
+- Works together with [ViewAssist](https://dinki.github.io/View-Assist/) and [Remote Assist Display](https://github.com/michelle-avery/remote-assist-display/) to enable visual feedback for smart home
+assistants
