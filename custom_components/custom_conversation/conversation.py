@@ -181,7 +181,7 @@ class CustomConversationEntity(
         )
 
         langfuse_context.update_current_trace(
-            tags=user_configured_tags.append([
+            tags=user_configured_tags.extend([
                 f"device_id:{user_input.device_id}",
                 f"device_name:{device_data['device_name']}",
                 f"device_area:{device_data['device_area']}",
