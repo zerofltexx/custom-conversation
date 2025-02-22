@@ -7,9 +7,9 @@ from enum import Enum
 from functools import cache, partial
 from typing import Any
 
+from langfuse.model import Prompt
 import slugify as unicode_slug
 import voluptuous as vol
-
 
 from homeassistant.components.homeassistant import async_should_expose
 from homeassistant.components.intent import async_device_supports_timers
@@ -33,7 +33,6 @@ from homeassistant.helpers import (
     selector,
     service,
 )
-from homeassistant.util import yaml
 from homeassistant.util.hass_dict import HassKey
 from homeassistant.util.json import JsonObjectType
 
@@ -44,14 +43,26 @@ from .prompt_manager import PromptContext, PromptManager
 class CustomLLMAPI(llm.API):
     """An API for the Custom Conversation integration to use to call Home Assistant services."""
 
-    def __init__(self, hass: HomeAssistant) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        user_name: str | None = None,
+        conversation_config_entry: ConfigEntry | None = None,
+    ) -> None:
         """Initialize the API."""
         super().__init__(hass=hass, id=LLM_API_ID, name="Custom Conversation LLM API")
         self.cached_slugify = cache(
             partial(unicode_slug.slugify, separator="_", lowercase=False)
         )
         self._hass = hass
+        self._request_user_name = user_name
         self._prompt_manager = PromptManager(hass)
+        self.prompt_object = None
+        self.conversation_config_entry = conversation_config_entry
+
+    def set_langfuse_client(self, langfuse_client: Any) -> None:
+        """Set the Langfuse client."""
+        self._prompt_manager.set_langfuse_client(langfuse_client)
 
     async def async_get_api_instance(
         self, llm_context: llm.LLMContext
@@ -72,25 +83,10 @@ class CustomLLMAPI(llm.API):
             custom_serializer=llm._selector_serializer,
         )
 
-    def _get_config_entry_from_context(self, llm_context: Any) -> ConfigEntry | None:
-        if not llm_context or not llm_context.context.origin_event:
-            return None
-
-        originating_entity = llm_context.context.origin_event.data.get("entity_id")
-        if not originating_entity:
-            return None
-
-        entity_registry = er.async_get(self.hass)
-        entity_entry = entity_registry.async_get(originating_entity)
-        if not entity_entry:
-            return None
-
-        return self.hass.config_entries.async_get_entry(entity_entry.config_entry_id)
-
     @callback
     def _async_get_api_prompt(
         self, llm_context: llm.LLMContext, exposed_entities: dict | None
-    ) -> str:
+    ) -> tuple[Prompt, str] | str:
         """Return the prompt for the API."""
 
         area_name = None
@@ -121,21 +117,23 @@ class CustomLLMAPI(llm.API):
         context = PromptContext(
             hass=self.hass,
             ha_name=self.hass.config.location_name,
+            user_name=self._request_user_name,
             llm_context=llm_context,
             location=location,
             exposed_entities=exposed_entities,
             supports_timers=supports_timers,
         )
 
-        config_entry = self._get_config_entry_from_context(llm_context)
-        return self._prompt_manager.get_api_prompt(context, config_entry)
+        return self._prompt_manager.get_api_prompt(
+            context, self.conversation_config_entry
+        )
 
     @callback
     def _async_get_tools(
         self, llm_context: llm.LLMContext, exposed_entities: dict | None
     ) -> list[llm.Tool]:
         """Return a list of LLM tools."""
-        config_entry = self._get_config_entry_from_context(llm_context)
+        config_entry = self.conversation_config_entry
         # Get ignored intents from options, fallback to defaults
         if config_entry:
             ignore_intents = config_entry.options.get(

@@ -1,10 +1,11 @@
 """Fixtures for Custom Conversation tests."""
+from .test_helpers import setup_mocks
+setup_mocks()
 import pytest
 from homeassistant.core import HomeAssistant
-from homeassistant.setup import async_setup_component, setup_component
-
-from pytest_homeassistant_custom_component.common import MockConfigEntry, MockEntity, MockEntityPlatform
-
+from homeassistant.setup import async_setup_component
+from unittest.mock import patch
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.custom_conversation.const import (
     CONF_CUSTOM_PROMPTS_SECTION,
     CONF_PROMPT_BASE,
@@ -12,6 +13,7 @@ from custom_components.custom_conversation.const import (
     CONF_API_PROMPT_BASE,
     CONF_PROMPT_DEVICE_KNOWN_LOCATION,
     CONF_PROMPT_NO_ENABLED_ENTITIES,
+    CONF_LANGFUSE_SECTION,
     DOMAIN,
 )
 
@@ -44,15 +46,23 @@ def config_entry(hass: HomeAssistant) -> MockConfigEntry:
         },
         options={
             CONF_CUSTOM_PROMPTS_SECTION: {
-            CONF_PROMPT_BASE: "Custom base prompt for {{ ha_name }}",
-            CONF_INSTRUCTIONS_PROMPT: "Custom instructions for {{ user_name }}",
-            CONF_API_PROMPT_BASE: "Custom API base prompt",
-            CONF_PROMPT_DEVICE_KNOWN_LOCATION: "Custom location prompt for {{ location }}",
-            CONF_PROMPT_NO_ENABLED_ENTITIES: "Custom no entities prompt",
-        }
+                CONF_PROMPT_BASE: "Custom base prompt for {{ ha_name }}",
+                CONF_INSTRUCTIONS_PROMPT: "Custom instructions for {{ user_name }}",
+                CONF_API_PROMPT_BASE: "Custom API base prompt",
+                CONF_PROMPT_DEVICE_KNOWN_LOCATION: "Custom location prompt for {{ location }}",
+                CONF_PROMPT_NO_ENABLED_ENTITIES: "Custom no entities prompt",
+            },
+            CONF_LANGFUSE_SECTION: {}
         }
     )
     entry.add_to_hass(hass)
     hass.config_entries.async_setup(entry.entry_id)
     hass.async_block_till_done
     return entry
+
+@pytest.fixture(autouse=True)
+async def mock_langfuse_client():
+    """Mock LangfuseClient."""
+    with patch('custom_components.custom_conversation.prompt_manager.LangfuseClient') as mock_client:
+        mock_client.create.return_value = None
+        yield mock_client

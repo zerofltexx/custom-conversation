@@ -72,3 +72,15 @@ CONF_PROMPT_EXPOSED_ENTITIES = "prompt_exposed_entities"
 DEFAULT_API_PROMPT_EXPOSED_ENTITIES = (
     "An overview of the areas and the devices in this smart home:"
 )
+
+# Langfuse Constants
+CONF_LANGFUSE_SECTION = "langfuse"
+CONF_ENABLE_LANGFUSE = "enable_langfuse"
+CONF_LANGFUSE_BASE_PROMPT_ID = "base_prompt_id"
+CONF_LANGFUSE_BASE_PROMPT_LABEL = "base_prompt_label"
+CONF_LANGFUSE_API_PROMPT_ID = "api_prompt_id"
+CONF_LANGFUSE_API_PROMPT_LABEL = "api_prompt_label"
+CONF_LANGFUSE_SECRET_KEY = "langfuse_secret_key"
+CONF_LANGFUSE_PUBLIC_KEY = "langfuse_public_key"
+CONF_LANGFUSE_HOST = "langfuse_host"
+CONF_LANGFUSE_TRACING_ENABLED = "langfuse_tracing_enabled"

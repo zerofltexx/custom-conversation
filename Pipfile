@@ -11,6 +11,7 @@ mutagen = "*"
 ha-ffmpeg = "*"
 pymicro-vad = "*"
 pyspeex-noise = "*"
+langfuse = "*"
 
 [dev-packages]
 pytest = "*"

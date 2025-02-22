@@ -18,6 +18,14 @@ from custom_components.custom_conversation.const import (
     CONF_ENABLE_LLM_AGENT,
     CONF_IGNORED_INTENTS,
     CONF_IGNORED_INTENTS_SECTION,
+    CONF_ENABLE_LANGFUSE,
+    CONF_LANGFUSE_SECTION,
+    CONF_LANGFUSE_SECRET_KEY,
+    CONF_LANGFUSE_PUBLIC_KEY,
+    CONF_LANGFUSE_HOST,
+    CONF_LANGFUSE_BASE_PROMPT_ID,
+    CONF_LANGFUSE_API_PROMPT_ID,
+    CONF_LANGFUSE_TRACING_ENABLED,
     CONF_LLM_PARAMETERS_SECTION,
     CONF_MAX_TOKENS,
     CONF_INSTRUCTIONS_PROMPT,
@@ -85,7 +93,7 @@ async def test_show_config_form(hass: HomeAssistant):
     
 
 async def test_options_flow(hass: HomeAssistant, config_entry):
-    """Test config flow options with sections in recommended mode."""
+    """Test config flow options with sections."""
     
     config_entry.add_to_hass(hass)
 
@@ -125,6 +133,15 @@ async def test_options_flow(hass: HomeAssistant, config_entry):
                     CONF_PROMPT_DEVICE_UNKNOWN_LOCATION: "test-prompt-unknown-location",
                     CONF_PROMPT_TIMERS_UNSUPPORTED: "test-prompt-timers-unsupported",
                     CONF_PROMPT_EXPOSED_ENTITIES: "test-prompt-exposed-entities",
+                },
+                CONF_LANGFUSE_SECTION: {
+                    CONF_ENABLE_LANGFUSE: True,
+                    CONF_LANGFUSE_SECRET_KEY: "sk-test-secret-key",
+                    CONF_LANGFUSE_PUBLIC_KEY: "pk-test-public-key",
+                    CONF_LANGFUSE_HOST: "http://langfuse.test",
+                    CONF_LANGFUSE_BASE_PROMPT_ID: "test-base-prompt-id",
+                    CONF_LANGFUSE_API_PROMPT_ID: "test-api-prompt-id",
+                    CONF_LANGFUSE_TRACING_ENABLED: False
                 }
             },
         )
@@ -146,6 +163,12 @@ async def test_options_flow(hass: HomeAssistant, config_entry):
         assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_DEVICE_UNKNOWN_LOCATION] == "test-prompt-unknown-location"
         assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_TIMERS_UNSUPPORTED] == "test-prompt-timers-unsupported"
         assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_EXPOSED_ENTITIES] == "test-prompt-exposed-entities"
+        assert result["data"][CONF_LANGFUSE_SECTION][CONF_ENABLE_LANGFUSE] is True
+        assert result["data"][CONF_LANGFUSE_SECTION][CONF_LANGFUSE_SECRET_KEY] == "sk-test-secret-key"
+        assert result["data"][CONF_LANGFUSE_SECTION][CONF_LANGFUSE_PUBLIC_KEY] == "pk-test-public-key"
+        assert result["data"][CONF_LANGFUSE_SECTION][CONF_LANGFUSE_HOST] == "http://langfuse.test"
+        assert result["data"][CONF_LANGFUSE_SECTION][CONF_LANGFUSE_BASE_PROMPT_ID] == "test-base-prompt-id"
+        assert result["data"][CONF_LANGFUSE_SECTION][CONF_LANGFUSE_API_PROMPT_ID] == "test-api-prompt-id"
 
 async def test_options_flow_empty_fields_reset(hass: HomeAssistant, config_entry):
     """Test config flow options with empty fields reset to recommended."""
@@ -186,6 +209,15 @@ async def test_options_flow_empty_fields_reset(hass: HomeAssistant, config_entry
                     CONF_PROMPT_DEVICE_UNKNOWN_LOCATION: "",
                     CONF_PROMPT_TIMERS_UNSUPPORTED: "",
                     CONF_PROMPT_EXPOSED_ENTITIES: "",
+                },
+                CONF_LANGFUSE_SECTION: {
+                    CONF_ENABLE_LANGFUSE: False,
+                    CONF_LANGFUSE_SECRET_KEY: "",
+                    CONF_LANGFUSE_PUBLIC_KEY: "",
+                    CONF_LANGFUSE_HOST: "",
+                    CONF_LANGFUSE_BASE_PROMPT_ID: "",
+                    CONF_LANGFUSE_API_PROMPT_ID: "",
+                    CONF_LANGFUSE_TRACING_ENABLED: False
                 }
 
             },
@@ -208,7 +240,13 @@ async def test_options_flow_empty_fields_reset(hass: HomeAssistant, config_entry
         assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_DEVICE_UNKNOWN_LOCATION] == DEFAULT_API_PROMPT_DEVICE_UNKNOWN_LOCATION
         assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_TIMERS_UNSUPPORTED] == DEFAULT_API_PROMPT_TIMERS_UNSUPPORTED
         assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_EXPOSED_ENTITIES] == DEFAULT_API_PROMPT_EXPOSED_ENTITIES
-
+        assert result["data"][CONF_LANGFUSE_SECTION][CONF_ENABLE_LANGFUSE] is False
+        assert result["data"][CONF_LANGFUSE_SECTION][CONF_LANGFUSE_SECRET_KEY] == ""
+        assert result["data"][CONF_LANGFUSE_SECTION][CONF_LANGFUSE_PUBLIC_KEY] == ""
+        assert result["data"][CONF_LANGFUSE_SECTION][CONF_LANGFUSE_HOST] == ""
+        assert result["data"][CONF_LANGFUSE_SECTION][CONF_LANGFUSE_BASE_PROMPT_ID] == ""
+        assert result["data"][CONF_LANGFUSE_SECTION][CONF_LANGFUSE_API_PROMPT_ID] == ""
+        assert result["data"][CONF_LANGFUSE_SECTION][CONF_LANGFUSE_TRACING_ENABLED] is False
 
 
 async def test_options_flow_ignored_intents(hass: HomeAssistant, config_entry):
@@ -248,7 +286,8 @@ async def test_options_flow_ignored_intents(hass: HomeAssistant, config_entry):
                     CONF_TOP_P: RECOMMENDED_TOP_P,
                     CONF_TEMPERATURE: RECOMMENDED_TEMPERATURE,
                 },
-                CONF_CUSTOM_PROMPTS_SECTION: {}
+                CONF_CUSTOM_PROMPTS_SECTION: {},
+                CONF_LANGFUSE_SECTION: {}
             },
         )
         assert result["type"] == FlowResultType.CREATE_ENTRY

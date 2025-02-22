@@ -5,16 +5,30 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from langfuse import Langfuse
+from langfuse.decorators import observe
+from langfuse.model import Prompt
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import TemplateError
 from homeassistant.helpers import entity_registry as er, template
-from homeassistant.util import yaml
+from homeassistant.util import yaml as yaml_util
 
 from .const import (
     CONF_API_PROMPT_BASE,
     CONF_CUSTOM_PROMPTS_SECTION,
+    CONF_ENABLE_LANGFUSE,
     CONF_INSTRUCTIONS_PROMPT,
+    CONF_LANGFUSE_API_PROMPT_ID,
+    CONF_LANGFUSE_API_PROMPT_LABEL,
+    CONF_LANGFUSE_BASE_PROMPT_ID,
+    CONF_LANGFUSE_BASE_PROMPT_LABEL,
+    CONF_LANGFUSE_HOST,
+    CONF_LANGFUSE_PUBLIC_KEY,
+    CONF_LANGFUSE_SECRET_KEY,
+    CONF_LANGFUSE_SECTION,
+    CONF_LANGFUSE_TRACING_ENABLED,
     CONF_PROMPT_BASE,
     CONF_PROMPT_DEVICE_KNOWN_LOCATION,
     CONF_PROMPT_DEVICE_UNKNOWN_LOCATION,
@@ -31,6 +45,18 @@ from .const import (
     DEFAULT_PROMPT_NO_ENABLED_ENTITIES,
     LOGGER,
 )
+
+
+class LangfuseError(Exception):
+    """Base class for Langfuse errors."""
+
+
+class LangfuseInitError(LangfuseError):
+    """Error initializing Langfuse client."""
+
+
+class LangfusePromptError(LangfuseError):
+    """Error getting or compiling Langfuse prompt."""
 
 
 @dataclass
@@ -52,22 +78,7 @@ class PromptManager:
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialize the prompt manager."""
         self.hass = hass
-
-    def _get_config_entry_from_context(self, llm_context: Any) -> ConfigEntry | None:
-        """Get config entry from LLM context."""
-        if not llm_context or not llm_context.context.origin_event:
-            return None
-
-        originating_entity = llm_context.context.origin_event.data.get("entity_id")
-        if not originating_entity:
-            return None
-
-        entity_registry = er.async_get(self.hass)
-        entity_entry = entity_registry.async_get(originating_entity)
-        if not entity_entry:
-            return None
-
-        return self.hass.config_entries.async_get_entry(entity_entry.config_entry_id)
+        self._langfuse_client = None
 
     def _get_prompt_config(
         self, config_entry: ConfigEntry | None, key: str, default: str
@@ -80,10 +91,42 @@ class PromptManager:
             key, default
         )
 
+    @observe()
+    async def _get_langfuse_prompt(
+        self, prompt_id: str, variables: dict[str, Any]
+    ) -> tuple[Prompt, str] | None:
+        """Get a prompt from Langfuse if enabled."""
+        if not self._langfuse_client:
+            return None
+
+        try:
+            return await self._langfuse_client.get_prompt(prompt_id, variables)
+        except Exception as err:
+            LOGGER.error("Error getting Langfuse prompt: %s", err)
+            return None
+
+    @observe()
     async def async_get_base_prompt(
         self, context: PromptContext, config_entry: ConfigEntry | None = None
-    ) -> str:
+    ) -> tuple[Prompt, str] | str:
         """Get the base prompt with rendered template."""
+        if config_entry and config_entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
+            CONF_ENABLE_LANGFUSE
+        ):
+            prompt_object, langfuse_prompt = await self._get_langfuse_prompt(
+                config_entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
+                    CONF_LANGFUSE_BASE_PROMPT_ID
+                ),
+                {
+                    "current_time": template.now().strftime("%H:%M"),
+                    "current_date": template.now().strftime("%Y-%m-%d"),
+                    "ha_name": context.ha_name,
+                    "user_name": context.user_name,
+                },
+            )
+            if langfuse_prompt:
+                return prompt_object, langfuse_prompt
+
         try:
             base_prompt = self._get_prompt_config(
                 config_entry, CONF_PROMPT_BASE, DEFAULT_BASE_PROMPT
@@ -107,10 +150,40 @@ class PromptManager:
             LOGGER.error("Error rendering base prompt: %s", err)
             raise
 
-    def get_api_prompt(
+    @observe()
+    async def get_api_prompt(
         self, context: PromptContext, config_entry: ConfigEntry | None = None
-    ) -> str:
+    ) -> tuple[Prompt, str] | str:
         """Get the API prompt based on context."""
+        if config_entry and config_entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
+            CONF_ENABLE_LANGFUSE
+        ):
+            prompt_object, langfuse_prompt = await self._get_langfuse_prompt(
+                config_entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
+                    CONF_LANGFUSE_API_PROMPT_ID
+                ),
+                {
+                    "current_time": template.now(hass=self.hass).strftime("%H:%M"),
+                    "current_date": template.now(hass=self.hass).strftime("%Y-%m-%d"),
+                    "ha_name": context.ha_name,
+                    "user_name": (
+                        context.user_name if context.user_name else "unknown"
+                    ),
+                    "location": (context.location if context.location else "unknown"),
+                    "exposed_entities": (
+                        yaml_util.dump(list(context.exposed_entities.values()))
+                        if context.exposed_entities
+                        else None
+                    ),
+                    "supports_timers": (
+                        "This device is not able to start timers."
+                        if not context.supports_timers
+                        else ""
+                    ),
+                },
+            )
+            if langfuse_prompt:
+                return prompt_object, langfuse_prompt
         prompt_parts = []
 
         if not context.exposed_entities:
@@ -167,6 +240,96 @@ class PromptManager:
                     DEFAULT_API_PROMPT_EXPOSED_ENTITIES,
                 )
             )
-            prompt_parts.append(yaml.dump(list(context.exposed_entities.values())))
+            prompt_parts.append(yaml_util.dump(list(context.exposed_entities.values())))
 
         return "\n".join(prompt_parts)
+
+    def set_langfuse_client(self, langfuse_client: Any) -> None:
+        """Set the Langfuse client."""
+        self._langfuse_client = langfuse_client
+
+
+class LangfuseClient:
+    """Client for Langfuse prompt management."""
+
+    def __init__(self, hass: HomeAssistant, client: Langfuse, prompts: dict) -> None:
+        """Initialize the client."""
+        self._client = client
+        self.hass = hass
+        self.prompts = prompts
+
+    @classmethod
+    async def create(
+        cls, hass: HomeAssistant, config_entry: ConfigEntry
+    ) -> LangfuseClient | None:
+        """Create a Langfuse client instance."""
+        if not config_entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
+            CONF_ENABLE_LANGFUSE
+        ):
+            return None
+        # Set up prompt dictionary from config entry
+        prompts = {
+            config_entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
+                CONF_LANGFUSE_BASE_PROMPT_ID
+            ): config_entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
+                CONF_LANGFUSE_BASE_PROMPT_LABEL, "production"
+            ),
+            config_entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
+                CONF_LANGFUSE_API_PROMPT_ID
+            ): config_entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
+                CONF_LANGFUSE_API_PROMPT_LABEL, "production"
+            ),
+        }
+        try:
+
+            def create_client() -> Langfuse:
+                return Langfuse(
+                    public_key=config_entry.options[CONF_LANGFUSE_SECTION][
+                        CONF_LANGFUSE_PUBLIC_KEY
+                    ],
+                    secret_key=config_entry.options[CONF_LANGFUSE_SECTION][
+                        CONF_LANGFUSE_SECRET_KEY
+                    ],
+                    host=config_entry.options[CONF_LANGFUSE_SECTION].get(
+                        CONF_LANGFUSE_HOST
+                    ),
+                    enabled=config_entry.options[CONF_LANGFUSE_SECTION][
+                        CONF_LANGFUSE_TRACING_ENABLED
+                    ],
+                    max_retries=0,
+                )
+
+            client = await hass.async_add_executor_job(create_client)
+            return cls(hass, client, prompts)
+        except Exception as err:
+            LOGGER.error("Error initializing Langfuse client: %s", err)
+            raise LangfuseInitError("Failed to initialize Langfuse client") from err
+
+    @observe()
+    async def get_prompt(
+        self, prompt_id: str, variables: dict[str, Any]
+    ) -> tuple[Prompt, str]:
+        """Get and compile a prompt from Langfuse."""
+        try:
+            # Get the prompt object in an executor
+            prompt_object = await self.hass.async_add_executor_job(
+                lambda: self._client.get_prompt(
+                    prompt_id, label=self.prompts[prompt_id], type="chat"
+                )
+            )
+            # Compile the prompt in an executor
+            compiled_prompt = prompt_object.compile(**variables)[0]["content"]
+        except Exception as err:
+            LOGGER.error("Error getting Langfuse prompt: %s", err)
+            raise LangfusePromptError(f"Failed to get Langfuse prompt: {err}") from err
+        return prompt_object, compiled_prompt
+
+    async def cleanup(self) -> None:
+        """Clean up Langfuse client resources."""
+        if self._client:
+            try:
+                # Flush any pending data and stop the consumer thread
+                await self.hass.async_add_executor_job(self._client.flush)
+                await self.hass.async_add_executor_job(self._client.close)
+            except Exception as err:
+                LOGGER.warning("Error cleaning up Langfuse client: %s", err)

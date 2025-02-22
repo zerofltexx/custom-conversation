@@ -3,14 +3,10 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from homeassistant.core import HomeAssistant
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.exceptions import TemplateError
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.custom_conversation.prompt_manager import (
-    PromptContext,
-    PromptManager,
+    PromptContext, PromptManager
 )
 from custom_components.custom_conversation.const import (
     CONF_CUSTOM_PROMPTS_SECTION,
@@ -21,7 +17,6 @@ from custom_components.custom_conversation.const import (
     DEFAULT_API_PROMPT_BASE,
     DEFAULT_PROMPT_NO_ENABLED_ENTITIES,
 )
-
 
 
 @pytest.fixture
@@ -58,7 +53,7 @@ async def test_get_base_prompt_custom(prompt_manager, hass, config_entry):
     assert "Custom instructions for Test User" in prompt
 
 
-def test_get_api_prompt_no_entities(prompt_manager, hass):
+async def test_get_api_prompt_no_entities(prompt_manager, hass):
     """Test API prompt when no entities are exposed."""
     context = PromptContext(
         hass=hass,
@@ -66,12 +61,12 @@ def test_get_api_prompt_no_entities(prompt_manager, hass):
         exposed_entities=None,
     )
     
-    prompt = prompt_manager.get_api_prompt(context)
+    prompt = await prompt_manager.get_api_prompt(context)
     
     assert prompt == DEFAULT_PROMPT_NO_ENABLED_ENTITIES
 
 
-def test_get_api_prompt_with_location(prompt_manager, hass, config_entry):
+async def test_get_api_prompt_with_location(prompt_manager, hass, config_entry):
     """Test API prompt with location information."""
     context = PromptContext(
         hass=hass,
@@ -80,14 +75,14 @@ def test_get_api_prompt_with_location(prompt_manager, hass, config_entry):
         exposed_entities={"light.test": {"name": "Test Light"}},
     )
     
-    prompt = prompt_manager.get_api_prompt(context, config_entry)
+    prompt = await prompt_manager.get_api_prompt(context, config_entry)
     
     assert "Custom API base prompt" in prompt
     assert "Custom location prompt for Living Room" in prompt
     assert "Test Light" in prompt
 
 
-def test_get_api_prompt_no_timers(prompt_manager, hass):
+async def test_get_api_prompt_no_timers(prompt_manager, hass):
     """Test API prompt when timers are not supported."""
     context = PromptContext(
         hass=hass,
@@ -96,47 +91,10 @@ def test_get_api_prompt_no_timers(prompt_manager, hass):
         supports_timers=False,
     )
     
-    prompt = prompt_manager.get_api_prompt(context)
+    prompt = await prompt_manager.get_api_prompt(context)
     
     assert "This device is not able to start timers" in prompt
 
-
-def test_get_config_entry_from_context(prompt_manager, hass):
-    """Test getting config entry from LLM context."""
-    prompt_manager = PromptManager(hass)
-
-    with patch.object(er, "async_get") as mock_er_get:
-        mock_entity_registry = Mock()
-        mock_entity_entry = Mock()
-        mock_entity_entry.config_entry_id = "test_entry_id"
-        mock_entity_registry.async_get.return_value = mock_entity_entry
-        mock_er_get.return_value = mock_entity_registry
-        
-        mock_llm_context = Mock()
-        mock_llm_context.context.origin_event.data = {"entity_id": "test_entity"}
-        prompt_manager._get_config_entry_from_context(mock_llm_context)
-
-        mock_entity_registry.async_get.assert_called_once_with("test_entity")
-
-
-def test_get_config_entry_from_context_no_entity(prompt_manager):
-    """Test getting config entry when no entity is present."""
-    mock_llm_context = Mock()
-    mock_llm_context.context.origin_event.data = {}
-    
-    result = prompt_manager._get_config_entry_from_context(mock_llm_context)
-    
-    assert result is None
-
-
-def test_get_config_entry_from_context_no_event(prompt_manager):
-    """Test getting config entry when no event is present."""
-    mock_llm_context = Mock()
-    mock_llm_context.context.origin_event = None
-    
-    result = prompt_manager._get_config_entry_from_context(mock_llm_context)
-    
-    assert result is None
 
 
 def test_get_prompt_config_no_config_entry(prompt_manager):
