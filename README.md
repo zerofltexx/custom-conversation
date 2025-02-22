@@ -92,7 +92,7 @@ can be used.
   - Timer Support Prompt: Instructions regarding timer capabilities
   - Entities List Prompt: Indicates that the following text describes the entities present in the smart home (exposed entities will automatically be appended after this prompt segment)
 
-### Langfuse Integration (Experimental)
+### Langfuse Integration
 Langfuse support enables:
 - Remote prompt management
 - Conversation tracing and analytics
@@ -106,6 +106,8 @@ Configuration options:
 - **Base Prompt Label**: The label to use to select the version of your Prompt ID to use. For example, in a production environment, you may want to use the automatic "production" label, whereas in a
 dev environment, you may want to select a specific prompt version you're testing, or set it to the automatically created "latest" label.
 - **API Prompt ID**: This is the ID of the prompt that will be used if you have the LLM API enabled. Because Langfuse does not yet support composable prompts, this will likely have some redundant content with the Base Prompt (unless you don't bother with the base prompt, because you're always going ot have the LLM API enabled)
+- **Enable Langfuse Tracing**: This option enables the sending of traces of your Assistant events to Langfuse, which allows you to measure performance, utilization, etc.
+- **Langfuse Tags**: When tracing is enabled, these tags will be added to every langfuse trace. The device name, device id, and device area are automatically added as tags, but this field can useful for adding "production" and "development" tags, or to distinguish between multiple integration configurations.
 
 Creating Langfuse prompts:
 When using Langfuse for prompt management, the content of your prompts is stored in Langfuse itself, and you only configure the corresponding IDs in the Custom Conversation integration. Home Assistant templates aren't
