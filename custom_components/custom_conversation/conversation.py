@@ -45,6 +45,7 @@ from .const import (
     CONF_LANGFUSE_PUBLIC_KEY,
     CONF_LANGFUSE_SECRET_KEY,
     CONF_LANGFUSE_SECTION,
+    CONF_LANGFUSE_TAGS,
     CONF_LANGFUSE_TRACING_ENABLED,
     CONF_LLM_PARAMETERS_SECTION,
     CONF_MAX_TOKENS,
@@ -175,12 +176,16 @@ class CustomConversationEntity(
             "device_name": device.name if device else "Unknown",
             "device_area": device.area_id if device else "Unknown",
         }
+        user_configured_tags = self.entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
+            CONF_LANGFUSE_TAGS, []
+        )
+
         langfuse_context.update_current_trace(
-            tags=[
+            tags=user_configured_tags.extend([
                 f"device_id:{user_input.device_id}",
                 f"device_name:{device_data['device_name']}",
                 f"device_area:{device_data['device_area']}",
-            ]
+            ])
         )
         event_data = {
             "agent_id": user_input.agent_id,

@@ -84,7 +84,8 @@
               "langfuse_host": "Langfuse Host",
               "langfuse_public_key": "Langfuse Public Key",
               "langfuse_secret_key": "Langfuse Secret  Key",
-              "langfuse_tracing_enabled": "Enable Langfuse Tracing"
+              "langfuse_tracing_enabled": "Enable Langfuse Tracing",
+              "langfuse_tags": "Langfuse Tags"
             },
             "data_description": {
               "enable_langfuse": "Enable Langfuse for prompt management",
@@ -95,7 +96,8 @@
               "langfuse_host": "The host of the Langfuse API",
               "langfuse_public_key": "The public key for the Langfuse API",
               "langfuse_secret_key": "The secret key for the Langfuse API",
-              "langfuse_tracing_enabled": "Enable tracing for Langfuse"
+              "langfuse_tracing_enabled": "Enable tracing for Langfuse",
+              "langfuse_tags": "Optional tags that will be added to all Langfuse traces."
             }
           }
         }
