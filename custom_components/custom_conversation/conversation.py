@@ -176,17 +176,17 @@ class CustomConversationEntity(
             "device_name": device.name if device else "Unknown",
             "device_area": device.area_id if device else "Unknown",
         }
+        device_tags = [
+            f"device_id:{device_data['device_id']}",
+            f"device_name:{device_data['device_name']}",
+            f"device_area:{device_data['device_area']}",
+        ]
         user_configured_tags = self.entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
             CONF_LANGFUSE_TAGS, []
         )
+        new_tags = user_configured_tags + device_tags
 
-        langfuse_context.update_current_trace(
-            tags=user_configured_tags.extend([
-                f"device_id:{user_input.device_id}",
-                f"device_name:{device_data['device_name']}",
-                f"device_area:{device_data['device_area']}",
-            ])
-        )
+        langfuse_context.update_current_trace(tags=new_tags)
         event_data = {
             "agent_id": user_input.agent_id,
             "conversation_id": user_input.conversation_id,
