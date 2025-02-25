@@ -330,6 +330,5 @@ class LangfuseClient:
             try:
                 # Flush any pending data and stop the consumer thread
                 await self.hass.async_add_executor_job(self._client.flush)
-                await self.hass.async_add_executor_job(self._client.close)
             except Exception as err:
                 LOGGER.warning("Error cleaning up Langfuse client: %s", err)
