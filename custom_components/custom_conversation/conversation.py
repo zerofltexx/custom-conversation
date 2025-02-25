@@ -472,7 +472,7 @@ class CustomConversationEntity(
                     tool_call_data["tool_response"] = tool_response.copy()
                     # Tag langfuse traces with the intent as the tool call, and the success response as affected entities,
                     # matching the way it's done for hass-handled intents
-                    new_tags = ["tool_call:" + tool_input.tool_name]
+                    new_tags = ["intent:" + tool_input.tool_name]
                     if tool_response.get("data", {}).get("success"):
                         for entity in tool_response["data"]["success"]:
                             new_tags.extend([f"affected_entity:{entity['id']}"])
