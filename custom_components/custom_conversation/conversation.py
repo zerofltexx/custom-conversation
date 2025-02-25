@@ -216,6 +216,13 @@ class CustomConversationEntity(
                 await self._async_fire_conversation_ended(
                     result, HOME_ASSISTANT_AGENT, user_input, device_data
                 )
+                new_tags = ["handling_agent:home_assistant"]
+                if result.response.intent.intent_type is not None:
+                    new_tags.append(f"intent:{result.response.intent.intent_type}")
+                if len(result.response.success_results) > 0:
+                    for success_result in result.response.success_results:
+                        new_tags.append(f"affected_entity:{success_result.id}")
+                langfuse_context.update_current_trace(tags=new_tags)
                 return result
 
         if self.entry.options.get(CONF_AGENTS_SECTION, {}).get(CONF_ENABLE_LLM_AGENT):
@@ -226,6 +233,7 @@ class CustomConversationEntity(
                 await self._async_fire_conversation_ended(
                     result, "LLM", user_input, llm_data, device_data
                 )
+                langfuse_context.update_current_trace(tags=["handling_agent:llm"])
         return result
 
     @observe()
@@ -462,6 +470,13 @@ class CustomConversationEntity(
                     tool_response = await llm_api.async_call_tool(tool_input)
                     # Save a copy of the tool response before deleting any card data to save tokens
                     tool_call_data["tool_response"] = tool_response.copy()
+                    # Tag langfuse traces with the intent as the tool call, and the success response as affected entities,
+                    # matching the way it's done for hass-handled intents
+                    new_tags = ["intent:" + tool_input.tool_name]
+                    if tool_response.get("data", {}).get("success"):
+                        for entity in tool_response["data"]["success"]:
+                            new_tags.extend([f"affected_entity:{entity['id']}"])
+                    langfuse_context.update_current_trace(tags=new_tags)
                     if tool_response.get("card"):
                         del tool_response["card"]
                 except (HomeAssistantError, vol.Invalid) as e:

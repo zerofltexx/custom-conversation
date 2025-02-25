@@ -39,7 +39,7 @@ async def test_custom_conversation_tries_hass_agent_first(hass: HomeAssistant, c
     """Test that CustomConversationEntity tries the Home Assistant agent first when both are enabled."""
     assert await async_setup_component(hass, "custom_conversation", {})
     await hass.async_block_till_done()
-    mock_response = intent.IntentResponse(language="en")
+    mock_response = intent.IntentResponse(language="en", intent=Mock())
     mock_response.error_code = None
     mock_result = conversation.ConversationResult(mock_response, "test-conversation-id")
     with patch(
