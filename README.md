@@ -107,7 +107,7 @@ Configuration options:
 dev environment, you may want to select a specific prompt version you're testing, or set it to the automatically created "latest" label.
 - **API Prompt ID**: This is the ID of the prompt that will be used if you have the LLM API enabled. Because Langfuse does not yet support composable prompts, this will likely have some redundant content with the Base Prompt (unless you don't bother with the base prompt, because you're always going ot have the LLM API enabled)
 - **Enable Langfuse Tracing**: This option enables the sending of traces of your Assistant events to Langfuse, which allows you to measure performance, utilization, etc.
-- **Langfuse Tags**: When tracing is enabled, these tags will be added to every langfuse trace. The device name, device id, and device area are automatically added as tags, but this field can be useful for adding "production" and "development" tags, or to distinguish between multiple integration configurations.
+- **Langfuse Tags**: When tracing is enabled, these tags will be added to every langfuse trace. There are some tags automatically added (see below), but this field can be useful for adding "production" and "development" tags, or to distinguish between multiple integration configurations.
 Creating Langfuse prompts:
 When using Langfuse for prompt management, the content of your prompts is stored in Langfuse itself, and you only configure the corresponding IDs in the Custom Conversation integration. Home Assistant templates aren't
 supported with Langfuse integration, but the following variables can be used in Langfuse and will be substituted by the Custom Conversation integration for either the Base Prompt or the API Prompt. Make sure to note the lack of space between the braces and the variable:
@@ -141,7 +141,16 @@ Your location is {{location}}.
 An overview of the areas and the devices in this smart home:
 {{exposed_entities}}
 ```
-
+#### Default Langfuse Tags
+When tracing is enabled, the following tags are automatically added to all traces:
+- `device_id:*` - The device id if the request came from a device (ie, an Assist Satellite), or None if there was no device.
+- `device_area:*` - The area the device is in, or "Unknown".
+- `device_name:*` - The name of the device, or "Unknown".
+- `handling_agent:llm` and `handling_agent:home_assistant` - Indicate whether the request was handled by the Home Assistant agent or the LLM
+- `intent:*` - The intent that was handled by the Home Assistant agent, or a tool call by the LLM. When handled by an LLM, there could be multiple tags if there were multiple tool calls. While for the LLM agents,
+this is more accurately a "tool call" rather than a true "intent", the consistent tag allows for analysis, for example, of all traces where a switch was turned on, regardles of whether it was by the Home Assistant
+agent or the LLM agent.
+- `affected_entity:*` - The entity ID's successfully acted on by the intent or tool call.
 
 ## Events
 
