@@ -272,13 +272,6 @@ class LangfuseClient:
         prompts: dict,
         score_config_id: str | None = None,
     ) -> None:
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        client: Langfuse,
-        prompts: dict,
-        score_config_id: str | None = None,
-    ) -> None:
         """Initialize the client."""
         self._client = client
         self.hass = hass
