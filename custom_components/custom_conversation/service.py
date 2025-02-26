@@ -91,7 +91,6 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                 translation_placeholders={"config_entry": entry_id},
             )
 
-<<<<<<< HEAD
         client = hass.data[DOMAIN][entry.entry_id]["langfuse_client"]
         if client is None:
             raise HomeAssistantError("Langfuse client is not initialized.")
@@ -134,13 +133,3 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         ),
         supports_response=SupportsResponse.NONE,
     )
-=======
-        client = entry.
-
-        try:
-            response = await client.conversations.score()
-        except openai.OpenAIError as err:
-            raise HomeAssistantError(f"Error scoring conversation: {err}") from err
-
-        return response.data[0].model_dump(exclude={"b64_json"})
->>>>>>> refs/remotes/origin/scores
