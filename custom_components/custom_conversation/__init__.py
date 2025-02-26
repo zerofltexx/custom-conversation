@@ -3,30 +3,28 @@
 from __future__ import annotations
 
 from langfuse.openai import openai
-import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_API_KEY, Platform
-from homeassistant.core import (
-    HomeAssistant,
-    ServiceCall,
-    ServiceResponse,
-    SupportsResponse,
-)
-from homeassistant.exceptions import (
-    ConfigEntryNotReady,
-    HomeAssistantError,
-    ServiceValidationError,
-)
-from homeassistant.helpers import config_validation as cv, llm, selector
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv, llm
 from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.typing import ConfigType
 
 from .api import CustomLLMAPI
-from .const import CONF_BASE_URL, DOMAIN, LLM_API_ID, LOGGER
+from .const import (
+    CONF_BASE_URL,
+    CONF_LANGFUSE_HOST,
+    CONF_LANGFUSE_SCORE_ENABLED,
+    CONF_LANGFUSE_SECTION,
+    DOMAIN,
+    LLM_API_ID,
+    LOGGER,
+)
 from .prompt_manager import LangfuseClient, LangfuseError
+from .service import async_setup_services
 
-SERVICE_GENERATE_IMAGE = "generate_image"
 PLATFORMS = (Platform.CONVERSATION,)
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -40,56 +38,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     if not any(x.id == LLM_API_ID for x in llm.async_get_apis(hass)):
         llm.async_register_api(hass, CustomLLMAPI(hass))
 
-    async def render_image(call: ServiceCall) -> ServiceResponse:
-        """Render an image with dall-e."""
-        entry_id = call.data["config_entry"]
-        entry = hass.config_entries.async_get_entry(entry_id)
+    await async_setup_services(hass)
 
-        if entry is None or entry.domain != DOMAIN:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="invalid_config_entry",
-                translation_placeholders={"config_entry": entry_id},
-            )
-
-        client: openai.AsyncClient = entry.runtime_data
-
-        try:
-            response = await client.images.generate(
-                model="dall-e-3",
-                prompt=call.data["prompt"],
-                size=call.data["size"],
-                quality=call.data["quality"],
-                style=call.data["style"],
-                response_format="url",
-                n=1,
-            )
-        except openai.OpenAIError as err:
-            raise HomeAssistantError(f"Error generating image: {err}") from err
-
-        return response.data[0].model_dump(exclude={"b64_json"})
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_GENERATE_IMAGE,
-        render_image,
-        schema=vol.Schema(
-            {
-                vol.Required("config_entry"): selector.ConfigEntrySelector(
-                    {
-                        "integration": DOMAIN,
-                    }
-                ),
-                vol.Required("prompt"): cv.string,
-                vol.Optional("size", default="1024x1024"): vol.In(
-                    ("1024x1024", "1024x1792", "1792x1024")
-                ),
-                vol.Optional("quality", default="standard"): vol.In(("standard", "hd")),
-                vol.Optional("style", default="vivid"): vol.In(("vivid", "natural")),
-            }
-        ),
-        supports_response=SupportsResponse.ONLY,
-    )
     return True
 
 
@@ -128,12 +78,24 @@ async def async_setup_entry(
     }
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # Set up Langfuse trace config if enabled
+    if entry.options.get(CONF_LANGFUSE_SECTION, {}).get(CONF_LANGFUSE_SCORE_ENABLED):
+        # Get existing score configs
+        langfuse_host = entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
+            CONF_LANGFUSE_HOST
+        )
+        if not langfuse_host:
+            LOGGER.error(
+                "Langfuse score enabled but no host provided in options: %s",
+                entry.options,
+            )
+            return False
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Clean up clients."""
-     # Clean up Langfuse client if it exists
+    # Clean up Langfuse client if it exists
     if (
         DOMAIN in hass.data
         and entry.entry_id in hass.data[DOMAIN]

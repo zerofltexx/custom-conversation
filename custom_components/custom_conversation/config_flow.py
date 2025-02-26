@@ -49,10 +49,11 @@ from .const import (
     CONF_LANGFUSE_BASE_PROMPT_LABEL,
     CONF_LANGFUSE_HOST,
     CONF_LANGFUSE_PUBLIC_KEY,
+    CONF_LANGFUSE_SCORE_ENABLED,
     CONF_LANGFUSE_SECRET_KEY,
     CONF_LANGFUSE_SECTION,
-    CONF_LANGFUSE_TRACING_ENABLED,
     CONF_LANGFUSE_TAGS,
+    CONF_LANGFUSE_TRACING_ENABLED,
     CONF_LLM_PARAMETERS_SECTION,
     CONF_MAX_TOKENS,
     CONF_PROMPT_BASE,
@@ -125,6 +126,7 @@ RECOMMENDED_OPTIONS = {
         CONF_LANGFUSE_API_PROMPT_LABEL: "production",
         CONF_LANGFUSE_TRACING_ENABLED: False,
         CONF_LANGFUSE_TAGS: [],
+        CONF_LANGFUSE_SCORE_ENABLED: False,
     },
 }
 
@@ -356,7 +358,17 @@ def custom_conversation_config_option_schema(
                         default=options.get(CONF_LANGFUSE_SECTION, {}).get(
                             CONF_LANGFUSE_TAGS, []
                         ),
-                    ): SelectSelector(SelectSelectorConfig(options=[], multiple=True, custom_value=True)),
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[], multiple=True, custom_value=True
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_LANGFUSE_SCORE_ENABLED,
+                        default=options.get(CONF_LANGFUSE_SECTION, {}).get(
+                            CONF_LANGFUSE_SCORE_ENABLED, False
+                        ),
+                    ): bool,
                 }
             )
         ),
