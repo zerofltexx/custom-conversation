@@ -4,7 +4,7 @@ import logging
 
 DOMAIN = "custom_conversation"
 LOGGER = logging.getLogger(__package__)
-
+SERVICE_GENERATE_IMAGE = "generate_image"
 CONF_CHAT_MODEL = "chat_model"
 CONF_ENABLE_HASS_AGENT = "enable_home_assistant_agent"
 CONF_ENABLE_LLM_AGENT = "enable_llm_agent"
@@ -85,3 +85,7 @@ CONF_LANGFUSE_PUBLIC_KEY = "langfuse_public_key"
 CONF_LANGFUSE_HOST = "langfuse_host"
 CONF_LANGFUSE_TRACING_ENABLED = "langfuse_tracing_enabled"
 CONF_LANGFUSE_TAGS = "langfuse_tags"
+CONF_LANGFUSE_SCORE_ENABLED = "langfuse_score_enabled"
+LANGFUSE_SCORE_NAME = "cc_score"
+LANGFUSE_SCORE_POSITIVE = "positive"
+LANGFUSE_SCORE_NEGATIVE = "negative"
