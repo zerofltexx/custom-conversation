@@ -133,6 +133,24 @@
           "description": "The style of the generated image"
         }
       }
+    },
+    "score_conversation": {
+      "name": "Score conversation",
+      "description": "Score a conversation with Langfuse",
+      "fields": {
+        "config_entry": {
+          "name": "Config Entry",
+          "description": "The config entry to use for this action"
+        },
+        "assist_entity": {
+          "name": "Assist Device",
+          "description": "The device that the conversation took place on"
+        },
+        "score": {
+          "name": "Score",
+          "description": "The score to assign to the conversation"
+        }
+      }
     }
   },
   "exceptions": {

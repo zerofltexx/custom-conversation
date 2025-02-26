@@ -10,9 +10,18 @@ from homeassistant.core import (
     SupportsResponse,
 )
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from homeassistant.helpers import config_validation as cv, selector
+from homeassistant.helpers import (
+    config_validation as cv,
+    entity_registry as er,
+    selector,
+)
 
-from .const import DOMAIN, SERVICE_GENERATE_IMAGE
+from .const import (
+    DOMAIN,
+    LANGFUSE_SCORE_NEGATIVE,
+    LANGFUSE_SCORE_POSITIVE,
+    SERVICE_GENERATE_IMAGE,
+)
 
 
 async def async_setup_services(hass: HomeAssistant) -> None:
@@ -81,11 +90,45 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                 translation_placeholders={"config_entry": entry_id},
             )
 
-        client = entry.
+        client = hass.data[DOMAIN][entry.entry_id]["langfuse_client"]
+        if client is None:
+            raise HomeAssistantError("Langfuse client is not initialized.")
 
-        try:
-            response = await client.conversations.score()
-        except openai.OpenAIError as err:
-            raise HomeAssistantError(f"Error scoring conversation: {err}") from err
+        assist_entity = call.data["assist_entity"]
+        entity_registry = er.async_get(hass)
+        entity_entry = entity_registry.async_get(assist_entity)
+        device_id = entity_entry.device_id
+        score = call.data["score"]
 
-        return response.data[0].model_dump(exclude={"b64_json"})
+        await client.score(
+            device_id=device_id,
+            score=score,
+        )
+
+    hass.services.async_register(
+        DOMAIN,
+        "score_conversation",
+        score_conversation,
+        schema=vol.Schema(
+            {
+                vol.Required("config_entry"): selector.ConfigEntrySelector(
+                    {
+                        "integration": DOMAIN,
+                    }
+                ),
+                vol.Required("assist_entity"): selector.EntitySelector(
+                    {
+                        "domain": "assist_satellite",
+                        "multiple": False,
+                    }
+                ),
+                vol.Required("score"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[LANGFUSE_SCORE_NEGATIVE, LANGFUSE_SCORE_POSITIVE],
+                        mode="dropdown",
+                    )
+                ),
+            }
+        ),
+        supports_response=SupportsResponse.NONE,
+    )

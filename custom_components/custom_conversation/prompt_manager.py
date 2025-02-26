@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import datetime as dt
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from langfuse import Langfuse
@@ -16,7 +15,7 @@ from langfuse.model import Prompt
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import TemplateError
-from homeassistant.helpers import entity_registry as er, template
+from homeassistant.helpers import template
 from homeassistant.util import yaml as yaml_util
 
 from .const import (
@@ -387,7 +386,7 @@ class LangfuseClient:
                 lambda: self._client.get_traces(
                     name="custom_conversation_process",
                     tags=f"device_id:{device_id}",
-                    from_timestamp=(dt.now() - timedelta(minutes=5)).isoformat(),
+                    from_timestamp=(datetime.now() - timedelta(minutes=10)),
                 )
             )
             if not traces.data:
