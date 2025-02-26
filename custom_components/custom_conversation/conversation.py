@@ -214,7 +214,7 @@ class CustomConversationEntity(
             LOGGER.debug("Received response: %s", result.response.speech)
             if result.response.error_code is None:
                 await self._async_fire_conversation_ended(
-                    result, HOME_ASSISTANT_AGENT, user_input, device_data
+                    result, HOME_ASSISTANT_AGENT, user_input, device_data=device_data
                 )
                 new_tags = ["handling_agent:home_assistant"]
                 if result.response.intent.intent_type is not None:
@@ -231,7 +231,11 @@ class CustomConversationEntity(
             LOGGER.debug("Received response: %s", result.response.speech)
             if result.response.error_code is None:
                 await self._async_fire_conversation_ended(
-                    result, "LLM", user_input, llm_data, device_data
+                    result,
+                    "LLM",
+                    user_input,
+                    llm_data=llm_data,
+                    device_data=device_data,
                 )
                 langfuse_context.update_current_trace(tags=["handling_agent:llm"])
         return result
