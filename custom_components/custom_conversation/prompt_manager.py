@@ -358,43 +358,6 @@ class LangfuseClient:
                         )
                     )
             return cls(hass, client, prompts, score_config.id)
-            # Ensure the score config is created if it's enabled
-            if config_entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
-                CONF_LANGFUSE_SCORE_ENABLED
-            ):
-                score_configs = await hass.async_add_executor_job(
-                    client.api.score_configs.get
-                )
-                score_config = next(
-                    (
-                        score
-                        for score in score_configs.data
-                        if score.name == LANGFUSE_SCORE_NAME
-                    ),
-                    None,
-                )
-                if not score_config:
-                    score_config_request = CreateScoreConfigRequest(
-                        name=LANGFUSE_SCORE_NAME,
-                        data_type=ScoreDataType.CATEGORICAL,
-                        categories=[
-                            {
-                                "label": LANGFUSE_SCORE_POSITIVE,
-                                "value": 1,
-                            },
-                            {
-                                "label": LANGFUSE_SCORE_NEGATIVE,
-                                "value": 0,
-                            },
-                        ],
-                        description="Score for Custom Conversation Home Assistant integration",
-                    )
-                    score_config = await hass.async_add_executor_job(
-                        lambda: client.api.score_configs.create(
-                            request=score_config_request
-                        )
-                    )
-            return cls(hass, client, prompts, score_config.id)
         except Exception as err:
             LOGGER.error("Error initializing Langfuse client: %s", err)
             raise LangfuseInitError("Failed to initialize Langfuse client") from err
@@ -428,7 +391,7 @@ class LangfuseClient:
             # Get the latest trace that matches this device
             traces = await self.hass.async_add_executor_job(
                 lambda: self._client.get_traces(
-                    name="custom_conversation_process",
+                    name="cc_process",
                     tags=f"device_id:{device_id}",
                     from_timestamp=(datetime.now() - timedelta(minutes=10)),
                 )
