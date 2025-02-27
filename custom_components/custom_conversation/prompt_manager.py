@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
 
 from langfuse import Langfuse
+from langfuse.api import CreateScoreConfigRequest
+from langfuse.api.resources.commons.types import ScoreDataType
+from langfuse.api import CreateScoreConfigRequest
+from langfuse.api.resources.commons.types import ScoreDataType
 from langfuse.decorators import observe
 from langfuse.model import Prompt
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import TemplateError
-from homeassistant.helpers import entity_registry as er, template
+from homeassistant.helpers import template
 from homeassistant.util import yaml as yaml_util
 
 from .const import (
@@ -26,6 +31,8 @@ from .const import (
     CONF_LANGFUSE_BASE_PROMPT_LABEL,
     CONF_LANGFUSE_HOST,
     CONF_LANGFUSE_PUBLIC_KEY,
+    CONF_LANGFUSE_SCORE_ENABLED,
+    CONF_LANGFUSE_SCORE_ENABLED,
     CONF_LANGFUSE_SECRET_KEY,
     CONF_LANGFUSE_SECTION,
     CONF_LANGFUSE_TRACING_ENABLED,
@@ -43,6 +50,12 @@ from .const import (
     DEFAULT_BASE_PROMPT,
     DEFAULT_INSTRUCTIONS_PROMPT,
     DEFAULT_PROMPT_NO_ENABLED_ENTITIES,
+    LANGFUSE_SCORE_NAME,
+    LANGFUSE_SCORE_NEGATIVE,
+    LANGFUSE_SCORE_POSITIVE,
+    LANGFUSE_SCORE_NAME,
+    LANGFUSE_SCORE_NEGATIVE,
+    LANGFUSE_SCORE_POSITIVE,
     LOGGER,
 )
 
@@ -252,11 +265,19 @@ class PromptManager:
 class LangfuseClient:
     """Client for Langfuse prompt management."""
 
-    def __init__(self, hass: HomeAssistant, client: Langfuse, prompts: dict) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        client: Langfuse,
+        prompts: dict,
+        score_config_id: str | None = None,
+    ) -> None:
         """Initialize the client."""
         self._client = client
         self.hass = hass
         self.prompts = prompts
+        self.score_config_id = score_config_id
+        self.score_config_id = score_config_id
 
     @classmethod
     async def create(
@@ -300,7 +321,80 @@ class LangfuseClient:
                 )
 
             client = await hass.async_add_executor_job(create_client)
-            return cls(hass, client, prompts)
+            # Ensure the score config is created if it's enabled
+            if config_entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
+                CONF_LANGFUSE_SCORE_ENABLED
+            ):
+                score_configs = await hass.async_add_executor_job(
+                    client.api.score_configs.get
+                )
+                score_config = next(
+                    (
+                        score
+                        for score in score_configs.data
+                        if score.name == LANGFUSE_SCORE_NAME
+                    ),
+                    None,
+                )
+                if not score_config:
+                    score_config_request = CreateScoreConfigRequest(
+                        name=LANGFUSE_SCORE_NAME,
+                        data_type=ScoreDataType.CATEGORICAL,
+                        categories=[
+                            {
+                                "label": LANGFUSE_SCORE_POSITIVE,
+                                "value": 1,
+                            },
+                            {
+                                "label": LANGFUSE_SCORE_NEGATIVE,
+                                "value": 0,
+                            },
+                        ],
+                        description="Score for Custom Conversation Home Assistant integration",
+                    )
+                    score_config = await hass.async_add_executor_job(
+                        lambda: client.api.score_configs.create(
+                            request=score_config_request
+                        )
+                    )
+            return cls(hass, client, prompts, score_config.id)
+            # Ensure the score config is created if it's enabled
+            if config_entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
+                CONF_LANGFUSE_SCORE_ENABLED
+            ):
+                score_configs = await hass.async_add_executor_job(
+                    client.api.score_configs.get
+                )
+                score_config = next(
+                    (
+                        score
+                        for score in score_configs.data
+                        if score.name == LANGFUSE_SCORE_NAME
+                    ),
+                    None,
+                )
+                if not score_config:
+                    score_config_request = CreateScoreConfigRequest(
+                        name=LANGFUSE_SCORE_NAME,
+                        data_type=ScoreDataType.CATEGORICAL,
+                        categories=[
+                            {
+                                "label": LANGFUSE_SCORE_POSITIVE,
+                                "value": 1,
+                            },
+                            {
+                                "label": LANGFUSE_SCORE_NEGATIVE,
+                                "value": 0,
+                            },
+                        ],
+                        description="Score for Custom Conversation Home Assistant integration",
+                    )
+                    score_config = await hass.async_add_executor_job(
+                        lambda: client.api.score_configs.create(
+                            request=score_config_request
+                        )
+                    )
+            return cls(hass, client, prompts, score_config.id)
         except Exception as err:
             LOGGER.error("Error initializing Langfuse client: %s", err)
             raise LangfuseInitError("Failed to initialize Langfuse client") from err
@@ -323,6 +417,39 @@ class LangfuseClient:
             LOGGER.error("Error getting Langfuse prompt: %s", err)
             raise LangfusePromptError(f"Failed to get Langfuse prompt: {err}") from err
         return prompt_object, compiled_prompt
+
+    async def score(self, score: str, device_id: str) -> None:
+        """Score a conversation using Langfuse."""
+        if not self.score_config_id:
+            LOGGER.warning("Score config ID not set, skipping scoring")
+            return
+
+        try:
+            # Get the latest trace that matches this device
+            traces = await self.hass.async_add_executor_job(
+                lambda: self._client.get_traces(
+                    name="custom_conversation_process",
+                    tags=f"device_id:{device_id}",
+                    from_timestamp=(datetime.now() - timedelta(minutes=10)),
+                )
+            )
+            if not traces.data:
+                LOGGER.warning("No traces found for device %s", device_id)
+                return
+            # Score the latest trace
+            latest_trace = traces.data[0]
+
+            await self.hass.async_add_executor_job(
+                lambda: self._client.score(
+                    name=LANGFUSE_SCORE_NAME,
+                    value=score,
+                    comment="Score based on Home Assistant Service Call",
+                    trace_id=latest_trace.id,
+                    config_id=self.score_config_id,
+                )
+            )
+        except Exception as err:
+            LOGGER.error("Error scoring conversation: %s", err)
 
     async def cleanup(self) -> None:
         """Clean up Langfuse client resources."""

@@ -85,7 +85,8 @@
               "langfuse_public_key": "Langfuse Public Key",
               "langfuse_secret_key": "Langfuse Secret  Key",
               "langfuse_tracing_enabled": "Enable Langfuse Tracing",
-              "langfuse_tags": "Langfuse Tags"
+              "langfuse_tags": "Langfuse Tags",
+              "langfuse_score_enabled": "Enable Langfuse Scoring"
             },
             "data_description": {
               "enable_langfuse": "Enable Langfuse for prompt management",
@@ -97,7 +98,8 @@
               "langfuse_public_key": "The public key for the Langfuse API",
               "langfuse_secret_key": "The secret key for the Langfuse API",
               "langfuse_tracing_enabled": "Enable tracing for Langfuse",
-              "langfuse_tags": "Optional tags that will be added to all Langfuse traces."
+              "langfuse_tags": "Optional tags that will be added to all Langfuse traces.",
+              "langfuse_score_enabled": "Enable Home Assistant Actions to score Langfuse traces."
             }
           }
         }
@@ -129,6 +131,24 @@
         "style": {
           "name": "Style",
           "description": "The style of the generated image"
+        }
+      }
+    },
+    "score_conversation": {
+      "name": "Score conversation",
+      "description": "Score a conversation with Langfuse",
+      "fields": {
+        "config_entry": {
+          "name": "Config Entry",
+          "description": "The config entry to use for this action"
+        },
+        "assist_entity": {
+          "name": "Assist Device",
+          "description": "The device that the conversation took place on"
+        },
+        "score": {
+          "name": "Score",
+          "description": "The score to assign to the conversation"
         }
       }
     }

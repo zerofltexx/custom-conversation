@@ -38,3 +38,23 @@ generate_image:
           options:
             - "vivid"
             - "natural"
+score_conversation:
+  fields:
+    config_entry:
+      required: true
+      selector:
+        config_entry:
+          integration: custom_conversation
+    assist_entity:
+      required: true
+      selector:
+        entity:
+          domain: assist_satellite
+    score:
+      required: true
+      selector:
+        select:
+          options:
+            - "negative"
+            - "positive"
+

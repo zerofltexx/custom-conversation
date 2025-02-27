@@ -163,7 +163,7 @@ class CustomConversationEntity(
         conversation.async_unset_agent(self.hass, self.entry)
         await super().async_will_remove_from_hass()
 
-    @observe()
+    @observe(name="cc_process")
     async def async_process(
         self, user_input: conversation.ConversationInput
     ) -> conversation.ConversationResult:
@@ -240,7 +240,7 @@ class CustomConversationEntity(
                 langfuse_context.update_current_trace(tags=["handling_agent:llm"])
         return result
 
-    @observe()
+    @observe(name="cc_process_hass")
     async def _async_process_hass(
         self, user_input: conversation.ConversationInput
     ) -> conversation.ConversationResult:
@@ -257,7 +257,7 @@ class CustomConversationEntity(
             )
         return await hass_agent.async_process(user_input)
 
-    @observe()
+    @observe(name="cc_process_llm")
     async def _async_process_llm(
         self, user_input: conversation.ConversationInput
     ) -> tuple[conversation.ConversationResult, dict]:
