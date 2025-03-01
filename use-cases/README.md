@@ -16,6 +16,8 @@ The main Custom Conversation documentation covers general setup and configuratio
 3. **Example Configurations**: YAML snippets and complete examples
 4. **Helper Scripts**: Additional code to extend functionality for specific scenarios
 
+Note that the content in this directory supplements the main documentation but focuses on specific implementation patterns rather than general configuration. Always refer to the main README for basic setup and configuration options.
+
 ## Contributing
 
 If you've developed an interesting use case for Custom Conversation that you'd like to share, please consider contributing it to this directory. Follow the existing structure and include:
@@ -23,7 +25,3 @@ If you've developed an interesting use case for Custom Conversation that you'd l
 - A README.md with clear documentation
 - Any necessary blueprints, scripts, or configuration examples
 - Screenshots or diagrams if they help explain the implementation
-
-## Relationship to Main Documentation
-
-The content in this directory supplements the main documentation but focuses on specific implementation patterns rather than general configuration. Always refer to the main README for basic setup and configuration options.
