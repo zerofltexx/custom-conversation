@@ -1,0 +1,47 @@
+blueprint:
+  name: ViewAssist Conversation Rating Script
+  description: >
+    Handles the rating action when a user taps on a thumbs-up or thumbs-down icon on a ViewAssist device.
+    This script clears the status icons and sends the rating to Langfuse via the custom_conversation.score_conversation service.
+  domain: script
+  author: Michelle Avery
+  source_url: https://github.com/michelle-avery/custom-conversation/blob/main/use-cases/conversation-rating-viewassist/conversation_rating_script.yaml
+  input:
+    processing_delay:
+      name: Processing Delay
+      description: Delay before sending score to ensure Langfuse has processed the trace (in seconds)
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 10
+          unit_of_measurement: seconds
+          mode: slider
+          step: 1
+
+fields:
+  assist_entity:
+    description: The assist entity to score
+    example: sensor.stream_assist_stt
+  score:
+    description: The score to apply (positive or negative)
+    example: positive
+  entity_id:
+    description: The entity ID to hide buttons on
+    example: input_text.my_entity
+  config_entry:
+    description: The config entry ID for the Custom Conversation integration
+    example: 01J2K3L4M5N6O7P8Q9R
+
+sequence:
+  - service: python_script.set_state
+    data:
+      entity_id: "{{ entity_id }}"
+      status_icons: []
+  - delay:
+      seconds: !input processing_delay
+  - service: custom_conversation.score_conversation
+    data:
+      config_entry: "{{ config_entry }}"
+      assist_entity: "{{ assist_entity }}"
+      score: "{{ score }}"

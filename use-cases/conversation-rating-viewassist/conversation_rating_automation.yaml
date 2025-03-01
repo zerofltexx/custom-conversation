@@ -1,0 +1,95 @@
+blueprint:
+  name: ViewAssist Conversation Rating Prompt
+  description: >
+    Displays thumbs-up and thumbs-down icons on ViewAssist devices when a conversation ends,
+    allowing users to provide feedback on the conversation quality.
+
+    This automation listens for the custom_conversation_conversation_ended event and
+    displays rating icons on the matching ViewAssist device for 20 seconds.
+  domain: automation
+  author: Michelle Avery
+  source_url: https://github.com/michelle-avery/custom-conversation/blob/main/use-cases/conversation-rating-viewassist/conversation_rating_automation.yaml
+  input:
+    viewassist_satellites_group:
+      name: ViewAssist Satellites Group
+      description: The group entity containing all your ViewAssist satellite devices
+      selector:
+        entity:
+          domain: group
+    icon_display_time:
+      name: Icon Display Time
+      description: How long to display the rating icons (in seconds) if the user doesn't click them
+      default: 20
+      selector:
+        number:
+          min: 5
+          max: 60
+          unit_of_measurement: seconds
+          mode: slider
+          step: 5
+
+trigger:
+  - platform: event
+    event_type: custom_conversation_conversation_ended
+
+condition:
+  - condition: template
+    value_template: >-
+      {{ trigger.event.data.device_id is not none and
+      trigger.event.data.device_id != 'null' }}
+
+action:
+  - variables:
+      viewassist_satellites_group: !input viewassist_satellites_group
+      icon_display_time: !input icon_display_time
+      event_device_id: "{{ trigger.event.data.device_id }}"
+      satellite_entities: >
+        {% set ns = namespace(members=[]) %}
+        {% for entity_id in state_attr(viewassist_satellites_group, 'entity_id') %}
+          {% set ns.members = ns.members + [entity_id] %}
+        {% endfor %}
+        {{ ns.members }}
+  - repeat:
+      for_each: "{{ satellite_entities }}"
+      sequence:
+        - variables:
+            current_entity: "{{ repeat.item }}"
+            mic_device: "{{ state_attr(repeat.item, 'mic_device') }}"
+            mic_device_exists: "{{ state_attr(repeat.item, 'mic_device') is not none }}"
+            mic_device_id: >-
+              {% if state_attr(repeat.item, 'mic_device') is not none %}
+                {{ device_id(state_attr(repeat.item, 'mic_device')) }}
+              {% else %}
+                none
+              {% endif %}
+            is_matching_device: >-
+              {% if state_attr(repeat.item, 'mic_device') is not none %}
+                {{ device_id(state_attr(repeat.item, 'mic_device')) == event_device_id }}
+              {% else %}
+                false
+              {% endif %}
+        - choose:
+            - conditions:
+                - condition: template
+                  value_template: "{{ is_matching_device == true }}"
+              sequence:
+                - service: python_script.set_state
+                  data:
+                    entity_id: "{{ current_entity }}"
+                    status_icons:
+                      - thumbs_up
+                      - thumbs_down
+                - delay:
+                    seconds: "{{ icon_display_time }}"
+                - service: python_script.set_state
+                  data:
+                    entity_id: "{{ current_entity }}"
+                    status_icons: []
+        - service: system_log.write
+          data:
+            message: >
+              Entity: {{ current_entity }},  Mic Device: {{ mic_device }},  Mic
+              Exists: {{ mic_device_exists }},  Mic Device ID: {{ mic_device_id
+              }},  Event Device ID: {{ event_device_id }},  Is Matching: {{
+              is_matching_device }}
+            level: info
