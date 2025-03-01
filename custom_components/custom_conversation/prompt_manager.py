@@ -396,11 +396,13 @@ class LangfuseClient:
                     from_timestamp=(datetime.now() - timedelta(minutes=10)),
                 )
             )
+            LOGGER.debug("Traces found for device %s: %s", device_id, traces.data)
             if not traces.data:
                 LOGGER.warning("No traces found for device %s", device_id)
                 return
             # Score the latest trace
             latest_trace = traces.data[0]
+            LOGGER.debug("Scoring trace %s with score %s", latest_trace.id, score)
 
             await self.hass.async_add_executor_job(
                 lambda: self._client.score(

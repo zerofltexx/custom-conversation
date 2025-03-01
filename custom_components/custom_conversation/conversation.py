@@ -222,6 +222,7 @@ class CustomConversationEntity(
                 if len(result.response.success_results) > 0:
                     for success_result in result.response.success_results:
                         new_tags.append(f"affected_entity:{success_result.id}")
+                langfuse_context.update_current_observation(output=result.as_dict())
                 langfuse_context.update_current_trace(tags=new_tags)
                 return result
 
@@ -252,10 +253,15 @@ class CustomConversationEntity(
                 intent.IntentResponseErrorCode.UNKNOWN,
                 "Sorry, I had a problem talking to Home Assistant",
             )
+            langfuse_context.update_current_observation(
+                output=intent_response.as_dict()
+            )
             return conversation.ConversationResult(
                 response=intent_response, conversation_id=user_input.conversation_id
             )
-        return await hass_agent.async_process(user_input)
+        response = await hass_agent.async_process(user_input)
+        langfuse_context.update_current_observation(output=response.as_dict())
+        return response
 
     @observe(name="cc_process_llm")
     async def _async_process_llm(
