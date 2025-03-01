@@ -47,9 +47,12 @@ This implementation uses:
 In Home Assistant:
 
 1. Click here to import the conversation rating automation:
-[![Open your Home Assistant instance and import the blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://github.com%2Fmichelle-avery%2Fcustom-conversation%2Fblob%2Fmain%2Fuse-cases%2Fconversation-rating-viewassist%2Fconversation_rating_automation.yaml)
+
+   [![Open your Home Assistant instance and import the blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://github.com%2Fmichelle-avery%2Fcustom-conversation%2Fblob%2Fmain%2Fuse-cases%2Fconversation-rating-viewassist%2Fconversation_rating_automation.yaml)
+
 2. Click here to import the conversation rating script:
-[![Open your Home Assistant instance and import the blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://github.com%2Fmichelle-avery%2Fcustom-conversation%2Fblob%2Fmain%2Fuse-cases%2Fconversation-rating-viewassist%2Fconversation_rating_script.yaml)
+
+   [![Open your Home Assistant instance and import the blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://github.com%2Fmichelle-avery%2Fcustom-conversation%2Fblob%2Fmain%2Fuse-cases%2Fconversation-rating-viewassist%2Fconversation_rating_script.yaml)
 
 ### 2. Create the Automation
 
@@ -73,7 +76,7 @@ In Home Assistant:
 ### 4. Update ViewAssist Dashboard
 
 1. Open your ViewAssist dashboard configuration
-2. Add the configuration snippets from `viewassist_dashboard_config.yaml` to your dashboard:
+2. Add the configuration snippets from [viewassist_dashboard_config.md](viewassist_dashboard_config.md) to your dashboard:
    - Add the `var_mic_device` variable to your variables section
    - Add the `thumbs_up` and `thumbs_down` templates to your icon templates section
 
