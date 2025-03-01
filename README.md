@@ -261,3 +261,5 @@ This component is particularly useful for:
 - Developing prompts in a test environment and promoting them into production
 - Works together with [ViewAssist](https://dinki.github.io/View-Assist/) and [Remote Assist Display](https://github.com/michelle-avery/remote-assist-display/) to enable visual feedback for smart home
 assistants
+
+For detailed implementation examples of specific use cases, see the [use-cases directory](./use-cases/README.md).
