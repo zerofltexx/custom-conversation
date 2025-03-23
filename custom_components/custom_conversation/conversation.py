@@ -415,7 +415,6 @@ class CustomConversationEntity(
                         CONF_TEMPERATURE, RECOMMENDED_TEMPERATURE
                     ),
                     user=conversation_id,
-                    extra_body={"metadata": {"log_raw_request": True}},
                     langfuse_prompt=prompt_object,
                 )
             except openai.OpenAIError as err:
