@@ -349,7 +349,7 @@ class CustomConversationEntity(
                 ha_name=self.hass.config.location_name,
                 user_name=user_name,
             )
-            if isinstance(llm_api.api, CustomLLMAPI):
+            if llm_api and isinstance(llm_api.api, CustomLLMAPI):
                 # The LLM API is the CustomLLMAPI, so use its prompt. The prompt manager
                 # will pull in the  base prompt if langfuse is disabled.
                 prompt = await llm_api.api_prompt
