@@ -175,7 +175,7 @@ async def test_custom_conversation_openai_error(hass: HomeAssistant, config_entr
         )
         raise HomeAssistantError("Error talking to OpenAI API")
 
-    entity = CustomConversationEntity(config_entry, Mock())
+    entity = CustomConversationEntity(config_entry, Mock(), hass)
     entity.hass = hass
 
     with patch.object(
@@ -229,7 +229,7 @@ async def test_async_fire_conversation_error(hass: HomeAssistant, config_entry: 
     assert await async_setup_component(hass, "custom_conversation", {})
     await hass.async_block_till_done()
 
-    entity = CustomConversationEntity(config_entry, Mock())
+    entity = CustomConversationEntity(config_entry, Mock(), hass)
     entity.hass = hass
 
     events = []
