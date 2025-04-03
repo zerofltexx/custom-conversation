@@ -25,6 +25,7 @@ LLM_API_ID = "custom-conversation"
 HOME_ASSISTANT_AGENT = "conversation.home_assistant"
 CONVERSATION_STARTED_EVENT = f"{DOMAIN}_conversation_started"
 CONVERSATION_ENDED_EVENT = f"{DOMAIN}_conversation_ended"
+CONVERSATION_ERROR_EVENT = f"{DOMAIN}_conversation_error"
 
 CONF_CUSTOM_PROMPTS_SECTION = "custom_prompts"
 CONF_PROMPT_BASE = "prompt_base"

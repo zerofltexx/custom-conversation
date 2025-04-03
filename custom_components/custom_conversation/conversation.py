@@ -52,6 +52,7 @@ from .const import (
     CONF_TEMPERATURE,
     CONF_TOP_P,
     CONVERSATION_ENDED_EVENT,
+    CONVERSATION_ERROR_EVENT,
     CONVERSATION_STARTED_EVENT,
     DOMAIN,
     HOME_ASSISTANT_AGENT,
@@ -228,17 +229,43 @@ class CustomConversationEntity(
 
         if self.entry.options.get(CONF_AGENTS_SECTION, {}).get(CONF_ENABLE_LLM_AGENT):
             LOGGER.debug("Processing with LLM agent")
-            result, llm_data = await self._async_process_llm(user_input)
-            LOGGER.debug("Received response: %s", result.response.speech)
-            if result.response.error_code is None:
-                await self._async_fire_conversation_ended(
-                    result,
+            try:
+                result, llm_data = await self._async_process_llm(user_input)
+                LOGGER.debug("Received response: %s", result.response.speech)
+                if result.response.error_code is None:
+                    await self._async_fire_conversation_ended(
+                        result,
+                        "LLM",
+                        user_input,
+                        llm_data=llm_data,
+                        device_data=device_data,
+                    )
+                    langfuse_context.update_current_trace(tags=["handling_agent:llm"])
+                else:
+                    await self._async_fire_conversation_error(
+                        result.response.error_code,
+                        "LLM",
+                        user_input,
+                        device_data=device_data,
+                    )
+            except openai.RateLimitError as err:
+                error_message = getattr(err, 'body', str(err))
+                await self._async_fire_conversation_error(
+                    error_message,
                     "LLM",
                     user_input,
-                    llm_data=llm_data,
                     device_data=device_data,
                 )
-                langfuse_context.update_current_trace(tags=["handling_agent:llm"])
+                raise HomeAssistantError("Rate limited or insufficient funds") from err
+            except openai.OpenAIError as err:
+                error_message = getattr(err, 'body', str(err))
+                await self._async_fire_conversation_error(
+                    error_message,
+                    "LLM",
+                    user_input,
+                    device_data=device_data,
+                )
+                raise HomeAssistantError("Error talking to OpenAI API") from err
         return result
 
     @observe(name="cc_process_hass")
@@ -417,16 +444,15 @@ class CustomConversationEntity(
                     user=conversation_id,
                     langfuse_prompt=prompt_object,
                 )
+                LOGGER.debug("LLM API response: %s", result)
+            except openai.RateLimitError as err:
+                LOGGER.error("Rate limit error: %s", err)
+                # Re-raise the error so the caller can handle it and fire a message on the event bus
+                raise
             except openai.OpenAIError as err:
                 LOGGER.error("Error talking to OpenAI: %s", err)
-                intent_response = intent.IntentResponse(language=user_input.language)
-                intent_response.async_set_error(
-                    intent.IntentResponseErrorCode.UNKNOWN,
-                    "Sorry, I had a problem talking to OpenAI",
-                )
-                return conversation.ConversationResult(
-                    response=intent_response, conversation_id=conversation_id
-                )
+                # Re-raise the error so the caller can handle it and fire a message on the event bus
+                raise
 
             LOGGER.debug("Response %s", result)
             response = result.choices[0].message
@@ -532,6 +558,25 @@ class CustomConversationEntity(
                 "card": card,
             },
         )
+
+    async def _async_fire_conversation_error(
+        self,
+        error: str,
+        agent: str,
+        user_input: conversation.ConversationInput,
+        device_data: dict | None = None,
+    ) -> None:
+        """Fire an event to notify that an error occurred."""
+        event_data = {
+            "agent_id": user_input.agent_id,
+            "handling_agent": agent,
+            "device_id": user_input.device_id,
+            "device_name": device_data.get("device_name") if device_data else "Unknown",
+            "device_area": device_data.get("device_area") if device_data else "Unknown",
+            "request": user_input.text,
+            "error": error,
+        }
+        self.hass.bus.async_fire(CONVERSATION_ERROR_EVENT, event_data)
 
     async def _async_fire_conversation_ended(
         self,
