@@ -83,7 +83,7 @@ async def async_setup_entry(
     prompt_manager = PromptManager(hass)
     if langfuse_client:
         prompt_manager.set_langfuse_client(langfuse_client)
-    agent = CustomConversationEntity(config_entry, prompt_manager)
+    agent = CustomConversationEntity(config_entry, prompt_manager, hass)
     async_add_entities([agent])
 
 
@@ -109,10 +109,14 @@ class CustomConversationEntity(
     _attr_name = None
 
     def __init__(
-        self, entry: CustomConversationConfigEntry, prompt_manager: PromptManager
+        self,
+        entry: CustomConversationConfigEntry,
+        prompt_manager: PromptManager,
+        hass: HomeAssistant,
     ) -> None:
         """Initialize the agent."""
         self.entry = entry
+        self.hass = hass
         self.history: dict[str, list[ChatCompletionMessageParam]] = {}
         self._attr_unique_id = entry.entry_id
         self._attr_device_info = dr.DeviceInfo(
@@ -131,14 +135,16 @@ class CustomConversationEntity(
             CONF_LANGFUSE_TRACING_ENABLED, False
         ):
             try:
-                langfuse_context.configure(
-                    host=entry.options[CONF_LANGFUSE_SECTION][CONF_LANGFUSE_HOST],
-                    public_key=entry.options[CONF_LANGFUSE_SECTION][
-                        CONF_LANGFUSE_PUBLIC_KEY
-                    ],
-                    secret_key=entry.options[CONF_LANGFUSE_SECTION][
-                        CONF_LANGFUSE_SECRET_KEY
-                    ],
+                hass.async_add_executor_job(
+                    lambda: langfuse_context.configure(
+                        host=entry.options[CONF_LANGFUSE_SECTION][CONF_LANGFUSE_HOST],
+                        public_key=entry.options[CONF_LANGFUSE_SECTION][
+                            CONF_LANGFUSE_PUBLIC_KEY
+                        ],
+                        secret_key=entry.options[CONF_LANGFUSE_SECTION][
+                            CONF_LANGFUSE_SECRET_KEY
+                        ],
+                    )
                 )
             except ValueError as e:
                 LOGGER.error("Error configuring langfuse: %s", e)
@@ -249,7 +255,7 @@ class CustomConversationEntity(
                         device_data=device_data,
                     )
             except openai.RateLimitError as err:
-                error_message = getattr(err, 'body', str(err))
+                error_message = getattr(err, "body", str(err))
                 await self._async_fire_conversation_error(
                     error_message,
                     "LLM",
@@ -258,7 +264,7 @@ class CustomConversationEntity(
                 )
                 raise HomeAssistantError("Rate limited or insufficient funds") from err
             except openai.OpenAIError as err:
-                error_message = getattr(err, 'body', str(err))
+                error_message = getattr(err, "body", str(err))
                 await self._async_fire_conversation_error(
                     error_message,
                     "LLM",
