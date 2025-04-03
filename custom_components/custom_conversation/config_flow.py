@@ -218,22 +218,38 @@ def custom_conversation_config_option_schema(
                 {
                     vol.Optional(
                         CONF_CHAT_MODEL,
-                        description={"suggested_value": options.get(CONF_CHAT_MODEL)},
+                        description={
+                            "suggested_value": options.get(
+                                CONF_LLM_PARAMETERS_SECTION, {}
+                            ).get(CONF_CHAT_MODEL, RECOMMENDED_CHAT_MODEL)
+                        },
                         default=RECOMMENDED_CHAT_MODEL,
                     ): str,
                     vol.Optional(
                         CONF_MAX_TOKENS,
-                        description={"suggested_value": options.get(CONF_MAX_TOKENS)},
+                        description={
+                            "suggested_value": options.get(
+                                CONF_LLM_PARAMETERS_SECTION, {}
+                            ).get(CONF_MAX_TOKENS, RECOMMENDED_MAX_TOKENS)
+                        },
                         default=RECOMMENDED_MAX_TOKENS,
                     ): int,
                     vol.Optional(
                         CONF_TOP_P,
-                        description={"suggested_value": options.get(CONF_TOP_P)},
+                        description={
+                            "suggested_value": options.get(
+                                CONF_LLM_PARAMETERS_SECTION, {}
+                            ).get(CONF_TOP_P, RECOMMENDED_TOP_P)
+                        },
                         default=RECOMMENDED_TOP_P,
                     ): NumberSelector(NumberSelectorConfig(min=0, max=1, step=0.05)),
                     vol.Optional(
                         CONF_TEMPERATURE,
-                        description={"suggested_value": options.get(CONF_TEMPERATURE)},
+                        description={
+                            "suggested_value": options.get(
+                                CONF_LLM_PARAMETERS_SECTION, {}
+                            ).get(CONF_TEMPERATURE, RECOMMENDED_TEMPERATURE)
+                        },
                         default=RECOMMENDED_TEMPERATURE,
                     ): NumberSelector(NumberSelectorConfig(min=0, max=2, step=0.05)),
                 }
