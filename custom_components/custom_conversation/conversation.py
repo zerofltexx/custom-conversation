@@ -450,6 +450,14 @@ class CustomConversationEntity(
                     user=conversation_id,
                     langfuse_prompt=prompt_object,
                 )
+                # Assistant-role responses have the content field set to None, but Google's OpenAI compatible endpoint can't handle that
+                # and returns an error. So we set it to an empty string.
+                if (
+                    result.choices[0].message.role == "assistant"
+                    and result.choices[0].message.content is None
+                ):
+                    result.choices[0].message.content = ""
+
                 LOGGER.debug("LLM API response: %s", result)
             except openai.RateLimitError as err:
                 LOGGER.error("Rate limit error: %s", err)
@@ -605,7 +613,7 @@ class CustomConversationEntity(
         if llm_data:
             # If there's any card in the llm_data, we attach one to the response
             if any(
-                "card" in tool_call["tool_response"]
+                "card" in tool_call.get("tool_response", {})
                 for tool_call in llm_data.get("tool_calls", [])
             ):
                 event_data["result"]["response"]["card"] = choose_card(
