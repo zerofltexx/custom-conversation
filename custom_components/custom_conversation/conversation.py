@@ -5,29 +5,23 @@ import json
 from typing import Any, Literal
 
 from langfuse.decorators import langfuse_context, observe
-
-# import openai
-from langfuse.openai import openai
-from openai._types import NOT_GIVEN
-from openai.types.chat import (
+from litellm import OpenAIError, RateLimitError, completion
+from litellm.types.completion import (
     ChatCompletionAssistantMessageParam,
-    ChatCompletionMessage,
     ChatCompletionMessageParam,
     ChatCompletionMessageToolCallParam,
     ChatCompletionSystemMessageParam,
     ChatCompletionToolMessageParam,
-    ChatCompletionToolParam,
     ChatCompletionUserMessageParam,
 )
-from openai.types.chat.chat_completion_message_tool_call_param import Function
-from openai.types.shared_params import FunctionDefinition
+from litellm.types.llms.openai import NOT_GIVEN, ChatCompletionToolParam, Function
 import voluptuous as vol
 from voluptuous_openapi import convert
 
 from homeassistant.components import assist_pipeline, conversation
 from homeassistant.components.conversation import trace
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_LLM_HASS_API, MATCH_ALL
+from homeassistant.const import CONF_API_KEY, CONF_LLM_HASS_API, MATCH_ALL
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, TemplateError
 from homeassistant.helpers import device_registry as dr, intent, llm
@@ -38,6 +32,7 @@ from . import CustomConversationConfigEntry
 from .api import CustomLLMAPI, IntentTool
 from .const import (
     CONF_AGENTS_SECTION,
+    CONF_BASE_URL,
     CONF_CHAT_MODEL,
     CONF_ENABLE_HASS_AGENT,
     CONF_ENABLE_LLM_AGENT,
@@ -91,10 +86,10 @@ def _format_tool(
     tool: IntentTool, custom_serializer: Callable[[Any], Any] | None
 ) -> ChatCompletionToolParam:
     """Format tool specification."""
-    tool_spec = FunctionDefinition(
-        name=tool.name,
-        parameters=convert(tool.parameters, custom_serializer=custom_serializer),
-    )
+    tool_spec = {
+        "name": tool.name,
+        "parameters": convert(tool.parameters, custom_serializer=custom_serializer),
+    }
     if tool.description:
         tool_spec["description"] = tool.description
     return ChatCompletionToolParam(type="function", function=tool_spec)
@@ -254,7 +249,7 @@ class CustomConversationEntity(
                         user_input,
                         device_data=device_data,
                     )
-            except openai.RateLimitError as err:
+            except RateLimitError as err:
                 error_message = getattr(err, "body", str(err))
                 await self._async_fire_conversation_error(
                     error_message,
@@ -263,7 +258,7 @@ class CustomConversationEntity(
                     device_data=device_data,
                 )
                 raise HomeAssistantError("Rate limited or insufficient funds") from err
-            except openai.OpenAIError as err:
+            except OpenAIError as err:
                 error_message = getattr(err, "body", str(err))
                 await self._async_fire_conversation_error(
                     error_message,
@@ -302,6 +297,8 @@ class CustomConversationEntity(
     ) -> tuple[conversation.ConversationResult, dict]:
         """Process a sentence with the llm."""
         options = self.entry.options
+        api_key = self.entry.data.get(CONF_API_KEY)
+        base_url = self.entry.data.get(CONF_BASE_URL)
         intent_response = intent.IntentResponse(language=user_input.language)
         llm_api: CustomLLMAPI | None = None
         tools: list[ChatCompletionToolParam] | None = None
@@ -431,27 +428,39 @@ class CustomConversationEntity(
             {"messages": messages, "tools": llm_api.tools if llm_api else None},
         )
 
-        client = self.entry.runtime_data
         # To prevent infinite loops, we limit the number of iterations
         for _iteration in range(MAX_TOOL_ITERATIONS):
             try:
-                result = await client.chat.completions.create(
-                    model=options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
-                        CONF_CHAT_MODEL, RECOMMENDED_CHAT_MODEL
-                    ),
-                    messages=messages,
-                    tools=tools or NOT_GIVEN,
-                    max_tokens=options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
-                        CONF_MAX_TOKENS, RECOMMENDED_MAX_TOKENS
-                    ),
-                    top_p=options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
-                        CONF_TOP_P, RECOMMENDED_TOP_P
-                    ),
-                    temperature=options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
-                        CONF_TEMPERATURE, RECOMMENDED_TEMPERATURE
-                    ),
-                    user=conversation_id,
-                    langfuse_prompt=prompt_object,
+                result = await self.hass.async_add_executor_job(
+                    lambda: completion(
+                        api_key=api_key,
+                        base_url=base_url,
+                        model=f"openai/{
+                            options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
+                                CONF_CHAT_MODEL, RECOMMENDED_CHAT_MODEL
+                            )
+                        }",
+                        messages=messages,
+                        tools=tools or NOT_GIVEN,
+                        max_tokens=options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
+                            CONF_MAX_TOKENS, RECOMMENDED_MAX_TOKENS
+                        ),
+                        top_p=options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
+                            CONF_TOP_P, RECOMMENDED_TOP_P
+                        ),
+                        temperature=options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
+                            CONF_TEMPERATURE, RECOMMENDED_TEMPERATURE
+                        ),
+                        user=conversation_id,
+                        metadata={
+                            #    "generation_name": "cc_process_llm",
+                            "existing_trace_id": langfuse_context.get_current_trace_id(),
+                            "trace_id": langfuse_context.get_current_trace_id(),
+                            "parent_observation_id": langfuse_context.get_current_observation_id(),
+                            "prompt": prompt_object.__dict__ if prompt_object else None,
+                        },
+                        # langfuse_prompt=prompt_object,
+                    )
                 )
                 # Assistant-role responses have the content field set to None, but Google's OpenAI compatible endpoint can't handle that
                 # and returns an error. So we set it to an empty string.
@@ -462,11 +471,11 @@ class CustomConversationEntity(
                     result.choices[0].message.content = ""
 
                 LOGGER.debug("LLM API response: %s", result)
-            except openai.RateLimitError as err:
+            except RateLimitError as err:
                 LOGGER.error("Rate limit error: %s", err)
                 # Re-raise the error so the caller can handle it and fire a message on the event bus
                 raise
-            except openai.OpenAIError as err:
+            except OpenAIError as err:
                 LOGGER.error("Error talking to OpenAI: %s", err)
                 # Re-raise the error so the caller can handle it and fire a message on the event bus
                 raise
@@ -475,7 +484,7 @@ class CustomConversationEntity(
             response = result.choices[0].message
 
             def message_convert(
-                message: ChatCompletionMessage,
+                message,  # Todo: Figure out this type
             ) -> ChatCompletionMessageParam:
                 """Convert from class to TypedDict."""
                 tool_calls: list[ChatCompletionMessageToolCallParam] = []
