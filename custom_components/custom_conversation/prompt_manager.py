@@ -131,8 +131,8 @@ class PromptManager:
                     CONF_LANGFUSE_BASE_PROMPT_ID
                 ),
                 {
-                    "current_time": template.now().strftime("%H:%M"),
-                    "current_date": template.now().strftime("%Y-%m-%d"),
+                    "current_time": template.now(context.hass).strftime("%H:%M"),
+                    "current_date": template.now(context.hass).strftime("%Y-%m-%d"),
                     "ha_name": context.ha_name,
                     "user_name": context.user_name,
                 },

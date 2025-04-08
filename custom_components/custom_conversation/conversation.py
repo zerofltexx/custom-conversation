@@ -394,6 +394,9 @@ class CustomConversationEntity(
                 prompt = await self.prompt_manager.async_get_base_prompt(
                     prompt_context, self.entry
                 )
+                # If langfuse is successfully used, we'll get back a tuple that contains a prompt object as well
+                if isinstance(prompt, tuple):
+                    prompt_object, prompt = prompt
             else:
                 # We're using a different API, so we need to combine the base prompt with the API prompt
                 base_prompt = await self.prompt_manager.async_get_base_prompt(
