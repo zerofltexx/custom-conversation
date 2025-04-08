@@ -2,19 +2,14 @@
 
 from __future__ import annotations
 
-from langfuse.openai import openai
-
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_API_KEY, Platform
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv, llm
-from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.typing import ConfigType
 
 from .api import CustomLLMAPI
 from .const import (
-    CONF_BASE_URL,
     CONF_LANGFUSE_HOST,
     CONF_LANGFUSE_SCORE_ENABLED,
     CONF_LANGFUSE_SECTION,
@@ -28,8 +23,7 @@ from .service import async_setup_services
 PLATFORMS = (Platform.CONVERSATION,)
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
-type CustomConversationConfigEntry = ConfigEntry[openai.AsyncClient]
-
+type CustomConversationConfigEntry = ConfigEntry
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up Custom Conversation."""
@@ -47,24 +41,6 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: CustomConversationConfigEntry
 ) -> bool:
     """Set up a  Custom Conversation from a config entry."""
-    client = openai.AsyncOpenAI(
-        api_key=entry.data[CONF_API_KEY],
-        http_client=get_async_client(hass),
-        base_url=entry.data[CONF_BASE_URL],
-    )
-
-    # Cache current platform data which gets added to each request (caching done by library)
-    _ = await hass.async_add_executor_job(client.platform_headers)
-
-    try:
-        await hass.async_add_executor_job(client.with_options(timeout=10.0).models.list)
-    except openai.AuthenticationError as err:
-        LOGGER.error("Invalid API key: %s", err)
-        return False
-    except openai.OpenAIError as err:
-        raise ConfigEntryNotReady(err) from err
-
-    entry.runtime_data = client
 
     langfuse_client = None
     # initialize Langfuse client if enabled

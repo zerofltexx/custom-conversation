@@ -1,8 +1,9 @@
 """Services for Custom Conversation Integrations."""
 
-from langfuse.openai import openai
+from litellm import OpenAIError, image_generation
 import voluptuous as vol
 
+from homeassistant.const import CONF_API_KEY
 from homeassistant.core import (
     HomeAssistant,
     ServiceCall,
@@ -10,7 +11,6 @@ from homeassistant.core import (
     SupportsResponse,
 )
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-
 from homeassistant.helpers import (
     config_validation as cv,
     entity_registry as er,
@@ -18,6 +18,7 @@ from homeassistant.helpers import (
 )
 
 from .const import (
+    CONF_BASE_URL,
     DOMAIN,
     LANGFUSE_SCORE_NEGATIVE,
     LANGFUSE_SCORE_POSITIVE,
@@ -40,10 +41,11 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                 translation_placeholders={"config_entry": entry_id},
             )
 
-        client: openai.AsyncClient = entry.runtime_data
-
         try:
-            response = await client.images.generate(
+
+            response = await hass.async_add_executor_job(lambda: image_generation(
+                api_key=entry.data.get(CONF_API_KEY),
+                base_url=entry.data.get(CONF_BASE_URL),
                 model="dall-e-3",
                 prompt=call.data["prompt"],
                 size=call.data["size"],
@@ -51,8 +53,8 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                 style=call.data["style"],
                 response_format="url",
                 n=1,
-            )
-        except openai.OpenAIError as err:
+            ))
+        except OpenAIError as err:
             raise HomeAssistantError(f"Error generating image: {err}") from err
 
         return response.data[0].model_dump(exclude={"b64_json"})
