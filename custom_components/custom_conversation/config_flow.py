@@ -6,7 +6,7 @@ import logging
 from types import MappingProxyType
 from typing import Any
 
-import openai
+from litellm.exceptions import APIConnectionError, AuthenticationError
 import voluptuous as vol
 
 from homeassistant.config_entries import (
@@ -398,12 +398,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
 
     Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
     """
-    client = await hass.async_add_executor_job(
-        lambda: openai.AsyncOpenAI(
-            api_key=data[CONF_API_KEY], base_url=data[CONF_BASE_URL]
-        )
-    )
-    await hass.async_add_executor_job(client.with_options(timeout=10.0).models.list)
+    # Todo: Implement validation logic after modifying config flow for multiple providers
 
 
 class CustomConversationConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -419,9 +414,9 @@ class CustomConversationConfigFlow(ConfigFlow, domain=DOMAIN):
 
         try:
             await validate_input(self.hass, user_input)
-        except openai.APIConnectionError:
+        except APIConnectionError:
             errors["base"] = "cannot_connect"
-        except openai.AuthenticationError:
+        except AuthenticationError:
             errors["base"] = "invalid_auth"
         except Exception:  # pylint: disable=broad-except
             _LOGGER.exception("Unexpected exception")
