@@ -25,7 +25,7 @@ async def test_custom_conversation_entity_initialization(hass: HomeAssistant, co
     assert await async_setup_component(hass, "custom_conversation", {})
     await hass.async_block_till_done()
     state = hass.states.get("conversation.test")
-    
+
     assert state
     assert state.attributes["supported_features"] == 0
 
@@ -72,7 +72,7 @@ async def test_custom_conversation_tries_hass_agent_first(hass: HomeAssistant, c
         result = await conversation.async_converse(hass, "hello", "test-conversation-id", Context(), agent_id=config_entry.entry_id)
     assert result.conversation_id == "test-conversation-id"
     assert mock_process_hass.called
-    
+
 async def test_custom_conversation_llm_api_disabled(hass: HomeAssistant, config_entry: CustomConversationConfigEntry):
     """Test that the CustomConversationEntity works when LLM API is disabled."""
     assert await async_setup_component(hass, "custom_conversation", {})
@@ -94,7 +94,7 @@ async def test_custom_conversation_llm_api_disabled(hass: HomeAssistant, config_
     with patch(
         "custom_components.custom_conversation.conversation.CustomConversationEntity._async_process_hass", return_value=mock_result
     ) as mock_process_hass, patch(
-        "custom_components.custom_conversation.conversation.completion", # Patch the completion function used in _async_generate_completion
+        "custom_components.custom_conversation.conversation.completion",
         return_value=mock_llm_response
     ) as mock_completion:
 
@@ -113,8 +113,8 @@ async def test_custom_conversation_llm_api_disabled(hass: HomeAssistant, config_
         result = await conversation.async_converse(hass, "hello", "test-conversation-id", Context(), agent_id=config_entry.entry_id)
     assert result.conversation_id == "test-conversation-id"
     assert mock_process_hass.called
-    assert not result.response.error_code # Should succeed now
-    assert mock_completion.called # Verify litellm.completion was called
+    assert not result.response.error_code
+    assert mock_completion.called
     assert result.response.speech["plain"]["speech"] == "LLM response when API disabled"
 
 async def test_custom_conversation_rate_limit_error(hass: HomeAssistant, config_entry: CustomConversationConfigEntry):
