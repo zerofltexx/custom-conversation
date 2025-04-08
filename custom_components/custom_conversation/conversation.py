@@ -2,9 +2,14 @@
 
 from collections.abc import Callable
 import json
-from typing import Any, Literal
+import os
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Literal, Union
 
 from langfuse.decorators import langfuse_context, observe
+
+if TYPE_CHECKING:
+    from langfuse.types import PromptClient
 from litellm import OpenAIError, RateLimitError, completion
 from litellm.types.completion import (
     ChatCompletionAssistantMessageParam,
@@ -14,7 +19,7 @@ from litellm.types.completion import (
     ChatCompletionToolMessageParam,
     ChatCompletionUserMessageParam,
 )
-from litellm.types.llms.openai import NOT_GIVEN, ChatCompletionToolParam, Function
+from litellm.types.llms.openai import ChatCompletionToolParam, Function
 import voluptuous as vol
 from voluptuous_openapi import convert
 
@@ -297,8 +302,6 @@ class CustomConversationEntity(
     ) -> tuple[conversation.ConversationResult, dict]:
         """Process a sentence with the llm."""
         options = self.entry.options
-        api_key = self.entry.data.get(CONF_API_KEY)
-        base_url = self.entry.data.get(CONF_BASE_URL)
         intent_response = intent.IntentResponse(language=user_input.language)
         llm_api: CustomLLMAPI | None = None
         tools: list[ChatCompletionToolParam] | None = None
@@ -429,38 +432,15 @@ class CustomConversationEntity(
         )
 
         # To prevent infinite loops, we limit the number of iterations
+        langfuse_context.update_current_observation(prompt=prompt_object)
         for _iteration in range(MAX_TOOL_ITERATIONS):
             try:
-                result = await self.hass.async_add_executor_job(
-                    lambda: completion(
-                        api_key=api_key,
-                        base_url=base_url,
-                        model=f"openai/{
-                            options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
-                                CONF_CHAT_MODEL, RECOMMENDED_CHAT_MODEL
-                            )
-                        }",
-                        messages=messages,
-                        tools=tools or NOT_GIVEN,
-                        max_tokens=options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
-                            CONF_MAX_TOKENS, RECOMMENDED_MAX_TOKENS
-                        ),
-                        top_p=options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
-                            CONF_TOP_P, RECOMMENDED_TOP_P
-                        ),
-                        temperature=options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
-                            CONF_TEMPERATURE, RECOMMENDED_TEMPERATURE
-                        ),
-                        user=conversation_id,
-                        metadata={
-                            #    "generation_name": "cc_process_llm",
-                            "existing_trace_id": langfuse_context.get_current_trace_id(),
-                            "trace_id": langfuse_context.get_current_trace_id(),
-                            "parent_observation_id": langfuse_context.get_current_observation_id(),
-                            "prompt": prompt_object.__dict__ if prompt_object else None,
-                        },
-                        # langfuse_prompt=prompt_object,
-                    )
+                result = await self._async_generate_completion(
+                    config_options=options,
+                    messages=messages,
+                    tools=tools,  # Pass None if no tools are defined, avoid NOT_GIVEN
+                    conversation_id=conversation_id,
+                    prompt=prompt_object,
                 )
                 # Assistant-role responses have the content field set to None, but Google's OpenAI compatible endpoint can't handle that
                 # and returns an error. So we set it to an empty string.
@@ -564,6 +544,54 @@ class CustomConversationEntity(
         return conversation.ConversationResult(
             response=intent_response, conversation_id=conversation_id
         ), llm_details
+
+    @observe(name="cc_generate_completion")
+    async def _async_generate_completion(
+        self,
+        config_options: MappingProxyType[str, Any],
+        messages: list[ChatCompletionMessageParam],
+        tools: list[ChatCompletionToolParam] | None,
+        conversation_id: str,
+        prompt: Union["PromptClient", None] = None,
+    ) -> Any:
+        """Generate a completion from the LLM."""
+        generation_id = langfuse_context.get_current_observation_id()
+        existing_trace_id = langfuse_context.get_current_trace_id()
+        return await self.hass.async_add_executor_job(
+            lambda: completion(
+                api_key=self.entry.data.get(CONF_API_KEY),
+                base_url=self.entry.data.get(CONF_BASE_URL),
+                model=f"openai/{config_options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(CONF_CHAT_MODEL, RECOMMENDED_CHAT_MODEL)}",
+                messages=messages,
+                tools=tools,
+                max_tokens=config_options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
+                    CONF_MAX_TOKENS, RECOMMENDED_MAX_TOKENS
+                ),
+                top_p=config_options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
+                    CONF_TOP_P, RECOMMENDED_TOP_P
+                ),
+                temperature=config_options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
+                    CONF_TEMPERATURE, RECOMMENDED_TEMPERATURE
+                ),
+                user=conversation_id,
+                metadata={
+                    "generation_id": generation_id,
+                    "existing_trace_id": existing_trace_id,
+                    "generation_name": "cc_generate_completion",
+                    "prompt": prompt.__dict__ if prompt else None,
+                },
+                langfuse_secret_key=config_options.get(CONF_LANGFUSE_SECTION, {}).get(
+                    CONF_LANGFUSE_SECRET_KEY
+                ),
+                langfuse_public_key=config_options.get(CONF_LANGFUSE_SECTION, {}).get(
+                    CONF_LANGFUSE_PUBLIC_KEY
+                ),
+                langfuse_host=config_options.get(CONF_LANGFUSE_SECTION, {}).get(
+                    CONF_LANGFUSE_HOST
+                ),
+                callbacks=["langfuse"],
+            )
+        )
 
     async def _async_entry_update_listener(
         self, hass: HomeAssistant, entry: ConfigEntry
