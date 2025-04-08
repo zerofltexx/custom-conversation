@@ -1,6 +1,7 @@
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch, MagicMock
 
 import pytest
+from litellm import RateLimitError
 
 from custom_components.custom_conversation import CustomConversationConfigEntry
 from custom_components.custom_conversation.const import (
@@ -10,6 +11,7 @@ from custom_components.custom_conversation.const import (
     CONVERSATION_ERROR_EVENT,
     LLM_API_ID,
 )
+# Removed incorrect import: from litellm.types.completion import ChatCompletionMessage
 from custom_components.custom_conversation.conversation import CustomConversationEntity
 from homeassistant.components import conversation
 from homeassistant.const import CONF_LLM_HASS_API
@@ -79,9 +81,23 @@ async def test_custom_conversation_llm_api_disabled(hass: HomeAssistant, config_
     mock_response = intent.IntentResponse(language="en", intent=Mock())
     mock_response.error_code = True
     mock_result = conversation.ConversationResult(mock_response, "test-conversation-id")
+
+    # Mock the litellm completion call to prevent network access and return a simple response
+    mock_llm_response = MagicMock()
+    mock_choice = MagicMock()
+    # Use MagicMock for the message structure
+    mock_message = MagicMock()
+    mock_message.role = "assistant"
+    mock_message.content = "LLM response when API disabled"
+    mock_choice.message = mock_message
+    mock_llm_response.choices = [mock_choice]
+
     with patch(
         "custom_components.custom_conversation.conversation.CustomConversationEntity._async_process_hass", return_value=mock_result
-    ) as mock_process_hass:
+    ) as mock_process_hass, patch(
+        "custom_components.custom_conversation.conversation.completion", # Patch the completion function used in _async_generate_completion
+        return_value=mock_llm_response
+    ) as mock_completion:
 
         hass.config_entries.async_update_entry(
             config_entry,
@@ -98,7 +114,9 @@ async def test_custom_conversation_llm_api_disabled(hass: HomeAssistant, config_
         result = await conversation.async_converse(hass, "hello", "test-conversation-id", Context(), agent_id=config_entry.entry_id)
     assert result.conversation_id == "test-conversation-id"
     assert mock_process_hass.called
-    assert not result.response.error_code
+    assert not result.response.error_code # Should succeed now
+    assert mock_completion.called # Verify litellm.completion was called
+    assert result.response.speech["plain"]["speech"] == "LLM response when API disabled"
 
 async def test_custom_conversation_rate_limit_error(hass: HomeAssistant, config_entry: CustomConversationConfigEntry):
     """Test that rate limit errors are properly handled and event is fired."""
@@ -110,12 +128,12 @@ async def test_custom_conversation_rate_limit_error(hass: HomeAssistant, config_
     mock_response.error_code = intent.IntentResponseErrorCode.UNKNOWN
     mock_result = conversation.ConversationResult(mock_response, "test-conversation-id")
 
-    class MockRateLimitError(Exception):
+    class MockRateLimitError(RateLimitError):
         """Mock for RateLimitError that works with try/except."""
 
-        def __init__(self):
-            super().__init__("Rate limited - out of quota")
-            self.body = "Rate limited - out of quota"
+        def __init__(self, message="Rate limited - out of quota", response=None, llm_provider="test_provider", model="test_model"):
+            super().__init__(message=message, response=response, llm_provider=llm_provider, model=model)
+            self.body = message
 
         def __str__(self):
             return "Rate limited - out of quota"
@@ -131,9 +149,6 @@ async def test_custom_conversation_rate_limit_error(hass: HomeAssistant, config_
     ), patch(
         "custom_components.custom_conversation.conversation.CustomConversationEntity._async_process_llm", 
         side_effect=rate_limit_error
-    ), patch(
-        "custom_components.custom_conversation.conversation.openai.RateLimitError", 
-        MockRateLimitError
     ), patch(
         "custom_components.custom_conversation.conversation.CustomConversationEntity._async_fire_conversation_error",
         AsyncMock()
