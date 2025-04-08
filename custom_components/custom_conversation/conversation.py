@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 import json
-import os
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, Union
 
@@ -20,6 +19,7 @@ from litellm.types.completion import (
     ChatCompletionUserMessageParam,
 )
 from litellm.types.llms.openai import ChatCompletionToolParam, Function
+from litellm.types.utils import Message
 import voluptuous as vol
 from voluptuous_openapi import convert
 
@@ -464,7 +464,7 @@ class CustomConversationEntity(
             response = result.choices[0].message
 
             def message_convert(
-                message,  # Todo: Figure out this type
+                message: Message,
             ) -> ChatCompletionMessageParam:
                 """Convert from class to TypedDict."""
                 tool_calls: list[ChatCompletionMessageToolCallParam] = []
