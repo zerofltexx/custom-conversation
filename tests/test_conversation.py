@@ -1,7 +1,7 @@
-from unittest.mock import AsyncMock, Mock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-import pytest
 from litellm import RateLimitError
+import pytest
 
 from custom_components.custom_conversation import CustomConversationConfigEntry
 from custom_components.custom_conversation.const import (
@@ -11,7 +11,6 @@ from custom_components.custom_conversation.const import (
     CONVERSATION_ERROR_EVENT,
     LLM_API_ID,
 )
-# Removed incorrect import: from litellm.types.completion import ChatCompletionMessage
 from custom_components.custom_conversation.conversation import CustomConversationEntity
 from homeassistant.components import conversation
 from homeassistant.const import CONF_LLM_HASS_API
