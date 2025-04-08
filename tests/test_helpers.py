@@ -34,3 +34,4 @@ def setup_mocks():
     sys.modules['langfuse.api.resources'] = mock_langfuse.api.resources
     sys.modules['langfuse.api.resources.commons'] = mock_langfuse.api.resources.commons
     sys.modules['langfuse.api.resources.commons.types'] = mock_langfuse.api.resources.commons.types
+    sys.modules['langfuse.types'] = mock_langfuse.types
