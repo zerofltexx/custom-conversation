@@ -12,6 +12,7 @@ ha-ffmpeg = "*"
 pymicro-vad = "*"
 pyspeex-noise = "*"
 langfuse = "*"
+litellm = "*"
 
 [dev-packages]
 pytest = "*"
