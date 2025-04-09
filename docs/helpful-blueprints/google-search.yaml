@@ -1,0 +1,40 @@
+blueprint:
+  name: Google Search LLM Tool
+  description: >
+    A blueprint that processes user queries and sends them to a selected
+    conversation agent (e.g., Google Generative AI), making speech text accessible.
+  domain: script
+  input:
+    agent:
+      name: Conversation Agent
+      description: The conversation agent to process the query
+      selector:
+        conversation_agent:
+fields:
+  query:
+    description: The search query to process
+    example: What was the score of the latest Blue Jackets game?
+    required: true
+    selector:
+      text:
+
+mode: queued
+sequence:
+  - alias: Log incoming query
+    data:
+      message: "Google Search Tool processing query: {{ query }}"
+      level: info
+    action: system_log.write
+
+  - alias: Call Conversation Agent
+    data:
+      text: "{{ query }}"
+      agent_id: !input agent
+    response_variable: conversation_result
+    action: conversation.process
+
+  - variables:
+      response: "{{ {'speech': conversation_result.response.speech.plain.speech} }}"
+
+  - stop: Return response
+    response_variable: response
