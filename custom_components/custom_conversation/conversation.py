@@ -673,7 +673,7 @@ class CustomConversationEntity(
 
 def choose_card(tool_calls):
     """Choose the most likely card from the tool calls."""
-    # It's possible that multiple tools have requested cards, but we only want to show one. For now, we'll choose the last tool call that has a card respose.
+    # It's possible that multiple tools have requested cards, but we only want to show one. For now, we'll choose the last tool call that has a card response.
     filtered_tool_calls = [
         tool_call for tool_call in tool_calls if isinstance(tool_call.get("tool_response"), dict) and "card" in tool_call["tool_response"]
     ]
