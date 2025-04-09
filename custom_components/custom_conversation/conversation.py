@@ -293,6 +293,26 @@ class CustomConversationEntity(
                 response=intent_response, conversation_id=user_input.conversation_id
             )
         response = await hass_agent.async_process(user_input)
+        if response.response.intent:
+            if response.response.intent.intent_type is not None:
+                LOGGER.debug(
+                    "Hass agent handled intent_type: %s",
+                    response.response.intent.intent_type,
+                )
+            if response.response.intent.slots is not None:
+                LOGGER.debug(
+                    "Hass agent handled intent with slots: %s",
+                    response.response.intent.slots,
+                )
+        if response.response.response_type is not None:
+            LOGGER.debug(
+                "Hass agent returned response_type: %s",
+                response.response.response_type,
+            )
+        if response.response.error_code is not None:
+            LOGGER.debug(
+                "Hass agent responded with error_code: %s", response.response.error_code
+            )
         langfuse_context.update_current_observation(output=response.as_dict())
         return response
 
@@ -326,6 +346,7 @@ class CustomConversationEntity(
         if llm_api := options.get(CONF_LLM_HASS_API):
             try:
                 if llm_api == LLM_API_ID:
+                    LOGGER.debug("Using Custom LLM API for request")
                     api_instance = CustomLLMAPI(
                         self.hass, user_name, conversation_config_entry=self.entry
                     )
@@ -334,14 +355,18 @@ class CustomConversationEntity(
                         .get(self.entry.entry_id, {})
                         .get("langfuse_client")
                     ):
+                        LOGGER.debug("Setting langfuse client for Custom LLM API")
                         api_instance.set_langfuse_client(langfuse_client)
                     llm_api = await api_instance.async_get_api_instance(llm_context)
                 else:
+                    LOGGER.debug("Using LLM API with ID: %s", llm_api.api.id)
                     llm_api = await llm.async_get_api(
                         self.hass,
                         llm_api,
                         llm_context,
                     )
+                if llm_api.tools:
+                    LOGGER.debug("LLM API tools available: %s", llm_api.tools)
             except HomeAssistantError as err:
                 LOGGER.error("Error getting LLM API: %s", err)
                 intent_response.async_set_error(
@@ -388,7 +413,9 @@ class CustomConversationEntity(
                 prompt = await llm_api.api_prompt
                 # If langfuse is successfully used, we'll get back a tuple that contains a prompt object as well
                 if isinstance(prompt, tuple):
+                    LOGGER.debug("Retrieved Langfuse Prompt")
                     prompt_object, prompt = prompt
+                LOGGER.debug("LLM API prompt: %s", prompt)
             elif not llm_api:
                 # No API is enabled - just get the base prompt
                 prompt = await self.prompt_manager.async_get_base_prompt(
@@ -396,7 +423,9 @@ class CustomConversationEntity(
                 )
                 # If langfuse is successfully used, we'll get back a tuple that contains a prompt object as well
                 if isinstance(prompt, tuple):
+                    LOGGER.debug("Retrieved Basic Langfuse Prompt")
                     prompt_object, prompt = prompt
+                LOGGER.debug("Base prompt: %s", prompt)
             else:
                 # We're using a different API, so we need to combine the base prompt with the API prompt
                 base_prompt = await self.prompt_manager.async_get_base_prompt(
@@ -405,6 +434,7 @@ class CustomConversationEntity(
                 prompt_parts = [base_prompt]
                 prompt_parts.append(llm_api.api_prompt)
                 prompt = "\n".join(prompt_parts)
+                LOGGER.debug("Combined prompt: %s", prompt)
 
         except TemplateError as err:
             LOGGER.error("Error rendering prompt: %s", err)
@@ -438,7 +468,7 @@ class CustomConversationEntity(
                 result = await self._async_generate_completion(
                     config_options=options,
                     messages=messages,
-                    tools=tools,  # Pass None if no tools are defined, avoid NOT_GIVEN
+                    tools=tools,
                     conversation_id=conversation_id,
                     prompt=prompt_object,
                 )
@@ -675,7 +705,10 @@ def choose_card(tool_calls):
     """Choose the most likely card from the tool calls."""
     # It's possible that multiple tools have requested cards, but we only want to show one. For now, we'll choose the last tool call that has a card response.
     filtered_tool_calls = [
-        tool_call for tool_call in tool_calls if isinstance(tool_call.get("tool_response"), dict) and "card" in tool_call["tool_response"]
+        tool_call
+        for tool_call in tool_calls
+        if isinstance(tool_call.get("tool_response"), dict)
+        and "card" in tool_call["tool_response"]
     ]
     if filtered_tool_calls:
         return filtered_tool_calls[-1]["tool_response"]["card"]
