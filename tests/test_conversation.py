@@ -165,11 +165,11 @@ async def test_custom_conversation_rate_limit_error(hass: HomeAssistant, config_
             },
         )
         await hass.config_entries.async_reload(config_entry.entry_id)
-
-        with pytest.raises(HomeAssistantError, match="Rate limited or insufficient funds"):
-            await conversation.async_converse(
+        response = await conversation.async_converse(
                 hass, "hello", "test-conversation-id", Context(), agent_id=config_entry.entry_id
             )
+
+        assert response.response.speech["plain"]["speech"] == "Rate limited or insufficient funds"
 
         assert mock_fire_error.called
         call_args = mock_fire_error.call_args[0]
