@@ -1,8 +1,7 @@
 blueprint:
-  name: Google Search LLM Tool
+  name: Google Search Tool
   description: >
-    A blueprint that processes user queries and sends them to a selected
-    conversation agent (e.g., Google Generative AI), making speech text accessible.
+    A tool that sends users' queries to a google search enabled agent and returns the response. 
   domain: script
   input:
     agent:
