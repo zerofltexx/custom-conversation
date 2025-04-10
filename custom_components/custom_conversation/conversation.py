@@ -119,6 +119,22 @@ def _message_convert(message: Message) -> ChatCompletionMessageParam:
         param["tool_calls"] = tool_calls
     return param
 
+def _chat_message_convert(
+        message: conversation.ChatMessage[ChatCompletionMessageParam],
+        agent_id: str | None,
+) -> ChatCompletionMessageParam:
+    """Convert any native chat message for this agent to the native format."""
+    if message.native is not None and message.agent_id == agent_id:
+        return message.native
+    return cast(
+        ChatCompletionMessageParam,
+        {
+            "role": message.role,
+            "content": message.content,
+        },
+    )
+
+
 class CustomConversationEntity(
     conversation.ConversationEntity, conversation.AbstractConversationAgent
 ):
@@ -389,28 +405,10 @@ class CustomConversationEntity(
             tools = [
                 _format_tool(tool, llm_api.custom_serializer) for tool in llm_api.tools
             ]
-        messages: list[ChatCompletionMessageParam] = []
-        for message in session.async_get_messages(user_input.agent_id):
-            if message.native is not None and message.agent_id == user_input.agent_id:
-                messages.append(message.native)
-            else:
-                messages.append(
-                    cast(
-                        ChatCompletionMessageParam,
-                        {"role":  message.role, "content": message.content},
-                    )
-                )
-
-        LOGGER.debug("Prompt: %s", messages)
-        LOGGER.debug("Tools: %s", tools)
-        trace.async_conversation_trace_append(
-            trace.ConversationTraceEventType.AGENT_DETAIL,
-            {
-                "messages": session.messages, 
-                "tools": session.llm_api.tools if session.llm_api else None
-            },
-        )
-
+        messages = [
+            _chat_message_convert(message, user_input.agent_id)
+            for message in session.async_get_messages()
+        ]
         # To prevent infinite loops, we limit the number of iterations
         langfuse_context.update_current_observation(prompt=prompt_object)
         llm_details = {}
@@ -471,7 +469,7 @@ class CustomConversationEntity(
                 )
 
                 try:
-                    tool_response = await session.llm_api.async_call_tool(tool_input)
+                    tool_response = await session.async_call_tool(tool_input)
                     # Save a copy of the tool response before deleting any card data to save tokens
                     tool_call_data["tool_response"] = tool_response.copy()
                     # Tag langfuse traces with the intent as the tool call, and the success response as affected entities,

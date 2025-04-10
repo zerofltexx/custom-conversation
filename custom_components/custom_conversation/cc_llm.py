@@ -5,6 +5,7 @@ from homeassistant.components.conversation import (
     ChatSession,
     ConversationInput,
     ConverseError,
+    trace
 )
 from homeassistant.const import LLM_API_ID
 from homeassistant.core import HomeAssistant
@@ -166,5 +167,13 @@ async def async_update_llm_data(
         role="system",
         agent_id=user_input.agent_id,
         content=prompt,
+    )
+
+    trace.async_conversation_trace_append(
+        trace.ConversationTraceEventType.AGENT_DETAIL,
+        {
+            "messages": session.messages,
+            "tools": session.llm_api.tools if session.llm_api else None,
+        }
     )
     return prompt_object
