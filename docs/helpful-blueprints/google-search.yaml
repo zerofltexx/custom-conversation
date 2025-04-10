@@ -11,7 +11,7 @@ blueprint:
         conversation_agent:
 fields:
   query:
-    description: The search query to process
+    description: The google search query to be sent
     example: What was the score of the latest Blue Jackets game?
     required: true
     selector:
