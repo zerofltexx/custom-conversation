@@ -22,12 +22,12 @@ import voluptuous as vol
 from voluptuous_openapi import convert
 
 from homeassistant.components import assist_pipeline, conversation
-from homeassistant.components.conversation import trace
+from homeassistant.components.conversation.chat_log import async_get_chat_log
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_API_KEY, CONF_LLM_HASS_API, MATCH_ALL
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import device_registry as dr, intent, llm
+from homeassistant.helpers import chat_session, device_registry as dr, intent, llm
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import CustomConversationConfigEntry
@@ -265,9 +265,12 @@ class CustomConversationEntity(
 
         if options.get(CONF_AGENTS_SECTION, {}).get(CONF_ENABLE_HASS_AGENT):
             LOGGER.debug("Processing with Home Assistant agent")
-            async with conversation.async_get_chat_session(
-                self.hass, user_input
-            ) as session:
+            async with (
+                chat_session.async_get_chat_session(
+                    self.hass, user_input
+                ) as session,
+                async_get_chat_log(self.hass, session, user_input) as chat_log,
+            ):
                 result = await self._async_handle_message_with_hass(user_input)
                 LOGGER.debug("Received response: %s", result.response.speech)
                 if result.response.error_code is None:
@@ -285,7 +288,7 @@ class CustomConversationEntity(
                             new_tags.append(f"affected_entity:{success_result.id}")
                     langfuse_context.update_current_observation(output=result.as_dict())
                     langfuse_context.update_current_trace(tags=new_tags)
-                    session.async_add_message(
+                    chat_log.async_add_message(
                         conversation.Content(
                             role="assistant",
                             agent_id=user_input.agent_id,
@@ -301,9 +304,12 @@ class CustomConversationEntity(
         if options.get(CONF_AGENTS_SECTION, {}).get(CONF_ENABLE_LLM_AGENT):
             LOGGER.debug("Processing with LLM agent")
             try:
-                async with conversation.async_get_chat_session(
-                    self.hass, user_input
-                ) as session:
+                async with (
+                    chat_session.async_get_chat_session(
+                        self.hass, user_input
+                    ) as session,
+                    async_get_chat_log(self.hass, session, user_input) as chat_log,
+                ):
                     result, llm_data = await self._async_handle_message_with_llm(
                         user_input, session
                     )
@@ -393,7 +399,7 @@ class CustomConversationEntity(
     async def _async_handle_message_with_llm(
         self,
         user_input: conversation.ConversationInput,
-        session,
+        session: conversation.ChatLog[ChatCompletionMessageParam],
     ) -> tuple[conversation.ConversationResult, dict]:
         """Process a sentence with the llm."""
 
