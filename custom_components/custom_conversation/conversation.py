@@ -96,6 +96,7 @@ def _format_tool(
         tool_spec["description"] = tool.description
     return ChatCompletionToolParam(type="function", function=tool_spec)
 
+
 def _message_convert(message: Message) -> ChatCompletionMessageParam:
     """Convert from class to TypedDict."""
     tool_calls: list[ChatCompletionMessageToolCallParam] = []
@@ -119,13 +120,16 @@ def _message_convert(message: Message) -> ChatCompletionMessageParam:
         param["tool_calls"] = tool_calls
     return param
 
+
 def _chat_message_convert(
-        message: conversation.ChatMessage[ChatCompletionMessageParam],
-        agent_id: str | None,
+    message: conversation.Content
+    | conversation.NativeContent[ChatCompletionMessageParam],
+    agent_id: str | None,
 ) -> ChatCompletionMessageParam:
     """Convert any native chat message for this agent to the native format."""
-    if message.native is not None and message.agent_id == agent_id:
-        return message.native
+    if message.role == "native":
+        # mypy doesn't understand that checking role ensures content type
+        return message.content  # type: ignore[return-value]
     return cast(
         ChatCompletionMessageParam,
         {
@@ -209,15 +213,16 @@ class CustomConversationEntity(
         self, user_input: conversation.ConversationInput
     ) -> conversation.ConversationResult:
         """Process a sentence."""
-        return await self._async_call_api(user_input)
+        return await self._async_handle_message(user_input)
 
-    @observe(name="cc_call_api")
-    async def _async_call_api(
+    @observe(name="cc_handle_message")
+    async def _async_handle_message(
         self,
         user_input: conversation.ConversationInput,
     ) -> conversation.ConversationResult:
         """Process enabled agents started with the built in agent."""
         LOGGER.debug("Processing user input: %s", user_input)
+        assert user_input.agent_id
         options = self.entry.options
         device_registry = dr.async_get(self.hass)
         device = device_registry.async_get(user_input.device_id)
@@ -263,11 +268,14 @@ class CustomConversationEntity(
             async with conversation.async_get_chat_session(
                 self.hass, user_input
             ) as session:
-                result = await self._async_call_hass_api(user_input)
+                result = await self._async_handle_message_with_hass(user_input)
                 LOGGER.debug("Received response: %s", result.response.speech)
                 if result.response.error_code is None:
                     await self._async_fire_conversation_ended(
-                        result, HOME_ASSISTANT_AGENT, user_input, device_data=device_data
+                        result,
+                        HOME_ASSISTANT_AGENT,
+                        user_input,
+                        device_data=device_data,
                     )
                     new_tags = ["handling_agent:home_assistant"]
                     if result.response.intent.intent_type is not None:
@@ -278,7 +286,7 @@ class CustomConversationEntity(
                     langfuse_context.update_current_observation(output=result.as_dict())
                     langfuse_context.update_current_trace(tags=new_tags)
                     session.async_add_message(
-                        conversation.ChatMessage(
+                        conversation.Content(
                             role="assistant",
                             agent_id=user_input.agent_id,
                             content=result.response.speech,
@@ -296,7 +304,9 @@ class CustomConversationEntity(
                 async with conversation.async_get_chat_session(
                     self.hass, user_input
                 ) as session:
-                    result, llm_data = await self._async_call_llm_api(user_input, session)
+                    result, llm_data = await self._async_handle_message_with_llm(
+                        user_input, session
+                    )
                     LOGGER.debug("Received response: %s", result.response.speech)
                     if result.response.error_code is None:
                         await self._async_fire_conversation_ended(
@@ -306,7 +316,9 @@ class CustomConversationEntity(
                             llm_data=llm_data,
                             device_data=device_data,
                         )
-                        langfuse_context.update_current_trace(tags=["handling_agent:llm"])
+                        langfuse_context.update_current_trace(
+                            tags=["handling_agent:llm"]
+                        )
                     else:
                         await self._async_fire_conversation_error(
                             result.response.error_code,
@@ -334,8 +346,8 @@ class CustomConversationEntity(
                 raise HomeAssistantError("Error talking to OpenAI API") from err
         return result
 
-    @observe(name="cc_call_hass_api")
-    async def _async_call_hass_api(
+    @observe(name="cc_handle_message_with_hass")
+    async def _async_handle_message_with_hass(
         self,
         user_input: conversation.ConversationInput,
     ) -> conversation.ConversationResult:
@@ -377,11 +389,11 @@ class CustomConversationEntity(
         langfuse_context.update_current_observation(output=response.as_dict())
         return response
 
-    @observe(name="cc_call_llm_api")
-    async def _async_call_llm_api(
+    @observe(name="cc_handle_message_with_llm")
+    async def _async_handle_message_with_llm(
         self,
         user_input: conversation.ConversationInput,
-        session: conversation.ChatSession,
+        session,
     ) -> tuple[conversation.ConversationResult, dict]:
         """Process a sentence with the llm."""
 
@@ -406,8 +418,7 @@ class CustomConversationEntity(
                 _format_tool(tool, llm_api.custom_serializer) for tool in llm_api.tools
             ]
         messages = [
-            _chat_message_convert(message, user_input.agent_id)
-            for message in session.async_get_messages()
+            _chat_message_convert(message) for message in session.async_get_messages()
         ]
         # To prevent infinite loops, we limit the number of iterations
         langfuse_context.update_current_observation(prompt=prompt_object)
@@ -444,11 +455,10 @@ class CustomConversationEntity(
             messages.append(_message_convert(response))
 
             session.async_add_message(
-                conversation.ChatMessage(
+                conversation.Content(
                     role=response.role,
                     agent_id=user_input.agent_id,
                     content=response.content or "",
-                    native=messages[-1],
                 ),
             )
 
@@ -499,11 +509,9 @@ class CustomConversationEntity(
                 llm_details["tool_calls"].append(tool_call_data)
 
                 session.async_add_message(
-                    conversation.ChatMessage(
-                        role="native",
+                    conversation.NativeContent(
                         agent_id=user_input.agent_id,
-                        content="",
-                        native=messages[-1],
+                        content=messages[-1],
                     )
                 )
 

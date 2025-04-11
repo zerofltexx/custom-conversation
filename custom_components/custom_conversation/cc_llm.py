@@ -1,19 +1,17 @@
 from langfuse.decorators import langfuse_context, observe
 
 from homeassistant.components.conversation import (
-    ChatMessage,
-    ChatSession,
+    Content,
     ConversationInput,
     ConverseError,
-    trace
+    trace,
 )
-from homeassistant.const import LLM_API_ID
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, TemplateError
 from homeassistant.helpers import intent, llm
 
 from .api import CustomLLMAPI
-from .const import DOMAIN, LOGGER
+from .const import DOMAIN, LLM_API_ID, LOGGER
 from .prompt_manager import PromptContext, PromptManager
 
 
@@ -163,7 +161,7 @@ async def async_update_llm_data(
     session.llm_api = llm_api
     session.user_name = user_name
     session.extra_system_prompt = extra_system_prompt
-    session.messages[0] = ChatMessage(
+    session.messages[0] = Content(
         role="system",
         agent_id=user_input.agent_id,
         content=prompt,
