@@ -265,7 +265,7 @@ class CustomConversationEntity(
 
         if options.get(CONF_AGENTS_SECTION, {}).get(CONF_ENABLE_HASS_AGENT):
             LOGGER.debug("Processing with Home Assistant agent")
-            async with (
+            with (
                 chat_session.async_get_chat_session(
                     self.hass, user_input
                 ) as session,
@@ -304,7 +304,7 @@ class CustomConversationEntity(
         if options.get(CONF_AGENTS_SECTION, {}).get(CONF_ENABLE_LLM_AGENT):
             LOGGER.debug("Processing with LLM agent")
             try:
-                async with (
+                with (
                     chat_session.async_get_chat_session(
                         self.hass, user_input
                     ) as session,
