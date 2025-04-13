@@ -28,7 +28,7 @@ jobs:
       env: 
         PYTHONPATH: ${{ github.workspace }}
       run: |
-        pipenv run pytest tests/ -v --cov-branch --cov-report=xml --junitxml=junit.xml -o junit_family=legacy
+        pipenv run pytest unit_tests/ -v --cov-branch --cov-report=xml --junitxml=junit.xml -o junit_family=legacy
 
     - name: Upload test results to Codecov
       if: ${{ !cancelled()}}
