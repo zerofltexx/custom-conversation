@@ -1,9 +1,9 @@
 from langfuse.decorators import langfuse_context, observe
 
 from homeassistant.components.conversation import (
-    Content,
     ConversationInput,
     ConverseError,
+    SystemContent,
     trace,
 )
 from homeassistant.core import HomeAssistant
@@ -12,15 +12,15 @@ from homeassistant.helpers import intent, llm
 
 from .api import CustomLLMAPI
 from .const import DOMAIN, LLM_API_ID, LOGGER
-from .prompt_manager import PromptContext, PromptManager
+from .prompt_manager import PromptContext
 
 
-@observe(name="cc_update_llm_data")
+@observe(name="cc_update_llm_data", capture_input=False)
 async def async_update_llm_data(
     hass: HomeAssistant,
     user_input: ConversationInput,
     config_entry,
-    session,
+    chat_log,
     prompt_manager,
     llm_api_name: str | None = None,
 ):
@@ -35,7 +35,7 @@ async def async_update_llm_data(
         context=user_input.context,
         user_prompt=user_input.text,
         language=user_input.language,
-        assistant="converstion", # Todo: Confirm
+        assistant="conversation", # Todo: Confirm
         device_id=user_input.device_id,
     )
 
@@ -91,7 +91,7 @@ async def async_update_llm_data(
             )
             raise ConverseError(
                     f"Error getting LLM API {llm_api_name}",
-                    conversation_id=session.conversation_id,
+                    conversation_id=chat_log.conversation_id,
                     response=intent_response,
                 ) from err
     prompt_object = None
@@ -101,7 +101,7 @@ async def async_update_llm_data(
             ha_name=hass.config.location_name,
             user_name=user_name,
         )
-        if llm_api and isinstance(llm_api, CustomLLMAPI):
+        if llm_api and isinstance(llm_api.api, CustomLLMAPI):
             # The LLM API is the CustomLLMAPI, so use its prompt. The prompt manager
             # will pull in the base prompt if langfuse is disabled.
             prompt = await llm_api.api_prompt
@@ -144,13 +144,13 @@ async def async_update_llm_data(
         )
         raise ConverseError(
             "Error rendering prompt",
-            conversation_id=session.conversation_id,
+            conversation_id=chat_log.conversation_id,
             response=intent_response,
         ) from err
 
     extra_system_prompt = (
         # Take new system prompt if one was given
-        user_input.extra_system_prompt or session.extra_system_prompt
+        user_input.extra_system_prompt or chat_log.extra_system_prompt
     )
 
     if extra_system_prompt:
@@ -158,20 +158,14 @@ async def async_update_llm_data(
         prompt += "\n" + extra_system_prompt
         langfuse_context.update_current_trace(tags=["extra_system_prompt"])
 
-    session.llm_api = llm_api
-    session.user_name = user_name
-    session.extra_system_prompt = extra_system_prompt
-    session.messages[0] = Content(
-        role="system",
-        agent_id=user_input.agent_id,
-        content=prompt,
-    )
-
+    chat_log.llm_api = llm_api
+    chat_log.extra_system_prompt = extra_system_prompt
+    chat_log.content[0] = SystemContent(content=prompt)
     trace.async_conversation_trace_append(
         trace.ConversationTraceEventType.AGENT_DETAIL,
         {
-            "messages": session.messages,
-            "tools": session.llm_api.tools if session.llm_api else None,
+            "messages": chat_log.content,
+            "tools": chat_log.llm_api.tools if chat_log.llm_api else None,
         }
     )
     return prompt_object
