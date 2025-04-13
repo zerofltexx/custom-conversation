@@ -53,7 +53,7 @@ async def test_custom_conversation_tries_hass_agent_first(hass: HomeAssistant, c
     mock_response.error_code = None
     mock_result = conversation.ConversationResult(mock_response, "test-conversation-id")
     with patch(
-        "custom_components.custom_conversation.conversation.CustomConversationEntity._async_process_hass", return_value=mock_result
+        "custom_components.custom_conversation.conversation.CustomConversationEntity._async_handle_message_with_hass", return_value=mock_result
     ) as mock_process_hass:
 
         hass.config_entries.async_update_entry(
@@ -90,9 +90,10 @@ async def test_custom_conversation_llm_api_disabled(hass: HomeAssistant, config_
     mock_message.content = "LLM response when API disabled"
     mock_choice.message = mock_message
     mock_llm_response.choices = [mock_choice]
+    mock_llm_response.tool_calls = []
 
     with patch(
-        "custom_components.custom_conversation.conversation.CustomConversationEntity._async_process_hass", return_value=mock_result
+        "custom_components.custom_conversation.conversation.CustomConversationEntity._async_handle_message_with_hass", return_value=mock_result
     ) as mock_process_hass, patch(
         "custom_components.custom_conversation.conversation.completion",
         return_value=mock_llm_response
@@ -143,10 +144,10 @@ async def test_custom_conversation_rate_limit_error(hass: HomeAssistant, config_
     hass.bus.async_listen(CONVERSATION_ERROR_EVENT, lambda e: events.append(e))
 
     with patch(
-        "custom_components.custom_conversation.conversation.CustomConversationEntity._async_process_hass", 
+        "custom_components.custom_conversation.conversation.CustomConversationEntity._async_handle_message_with_hass", 
         return_value=mock_result
     ), patch(
-        "custom_components.custom_conversation.conversation.CustomConversationEntity._async_process_llm", 
+        "custom_components.custom_conversation.conversation.CustomConversationEntity._async_handle_message_with_llm", 
         side_effect=rate_limit_error
     ), patch(
         "custom_components.custom_conversation.conversation.CustomConversationEntity._async_fire_conversation_error",
