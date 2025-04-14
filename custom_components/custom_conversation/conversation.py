@@ -564,7 +564,9 @@ class CustomConversationEntity(
         langfuse_context.update_current_trace(tags=new_tags)
         intent_response.async_set_speech(response.content or "")
         return conversation.ConversationResult(
-            response=intent_response, conversation_id=chat_log.conversation_id
+            response=intent_response,
+            conversation_id=chat_log.conversation_id,
+            continue_conversation=chat_log.continue_conversation,
         ), llm_details
 
     @observe(name="cc_generate_completion")
