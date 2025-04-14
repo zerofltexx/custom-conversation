@@ -21,6 +21,8 @@ pytest-cov = "*"
 pytest-asyncio = "*"
 homeassistant = "2025.4.1"
 python-dotenv = "*"
+pyobjc = {version = "*", sys_platform = "== 'darwin'"}
+
 [requires]
 python_version = "3.13"
 python_full_version = "3.13.2"
