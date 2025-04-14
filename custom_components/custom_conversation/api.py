@@ -136,8 +136,10 @@ class CustomLLMAPI(llm.API):
         config_entry = self.conversation_config_entry
         # Get ignored intents from options, fallback to defaults
         if config_entry:
-            ignore_intents = config_entry.options.get(
-                CONF_IGNORED_INTENTS, llm.AssistAPI.IGNORE_INTENTS
+            ignore_intents = set(
+                config_entry.options.get(
+                    CONF_IGNORED_INTENTS, llm.AssistAPI.IGNORE_INTENTS
+                )
             )
         else:
             ignore_intents = llm.AssistAPI.IGNORE_INTENTS
