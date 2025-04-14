@@ -1,3 +1,4 @@
+"""Replaces Some of Home Assistant's helpers/llm.py code to allow us to choose the correct prompt."""
 from langfuse.decorators import langfuse_context, observe
 
 from homeassistant.components.conversation import (
@@ -5,23 +6,25 @@ from homeassistant.components.conversation import (
     ConverseError,
     SystemContent,
     trace,
+    ChatLog,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, TemplateError
 from homeassistant.helpers import intent, llm
 
+from . import CustomConversationConfigEntry
 from .api import CustomLLMAPI
 from .const import DOMAIN, LLM_API_ID, LOGGER
-from .prompt_manager import PromptContext
+from .prompt_manager import PromptContext, PromptManager
 
 
 @observe(name="cc_update_llm_data", capture_input=False)
 async def async_update_llm_data(
     hass: HomeAssistant,
     user_input: ConversationInput,
-    config_entry,
-    chat_log,
-    prompt_manager,
+    config_entry: CustomConversationConfigEntry,
+    chat_log: ChatLog,
+    prompt_manager: PromptManager,
     llm_api_name: str | None = None,
 ):
     """Process the incoming message for the LLM.

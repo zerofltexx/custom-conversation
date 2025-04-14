@@ -9,7 +9,6 @@ from langfuse.decorators import langfuse_context, observe
 
 if TYPE_CHECKING:
     from langfuse.types import PromptClient
-import litellm
 from litellm import OpenAIError, RateLimitError, completion
 from litellm.types.completion import (
     ChatCompletionAssistantMessageParam,
@@ -19,7 +18,6 @@ from litellm.types.completion import (
 )
 from litellm.types.llms.openai import ChatCompletionToolParam, Function
 from litellm.types.utils import Message
-import voluptuous as vol
 from voluptuous_openapi import convert
 
 from homeassistant.components import assist_pipeline, conversation
@@ -35,7 +33,7 @@ from homeassistant.helpers import chat_session, device_registry as dr, intent, l
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import CustomConversationConfigEntry
-from .api import CustomLLMAPI, IntentTool
+from .api import IntentTool
 from .cc_llm import async_update_llm_data
 from .const import (
     CONF_AGENTS_SECTION,
