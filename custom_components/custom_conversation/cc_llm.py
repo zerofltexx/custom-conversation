@@ -2,11 +2,11 @@
 from langfuse.decorators import langfuse_context, observe
 
 from homeassistant.components.conversation import (
+    ChatLog,
     ConversationInput,
     ConverseError,
     SystemContent,
     trace,
-    ChatLog,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, TemplateError
