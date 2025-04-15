@@ -3,7 +3,7 @@
 from collections.abc import Callable
 import json
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal, Union
+from typing import TYPE_CHECKING, Any, Literal, Union, cast
 
 from langfuse.decorators import langfuse_context, observe
 
@@ -14,27 +14,27 @@ from litellm.types.completion import (
     ChatCompletionAssistantMessageParam,
     ChatCompletionMessageParam,
     ChatCompletionMessageToolCallParam,
-    ChatCompletionSystemMessageParam,
     ChatCompletionToolMessageParam,
-    ChatCompletionUserMessageParam,
 )
 from litellm.types.llms.openai import ChatCompletionToolParam, Function
 from litellm.types.utils import Message
-import voluptuous as vol
 from voluptuous_openapi import convert
 
 from homeassistant.components import assist_pipeline, conversation
-from homeassistant.components.conversation import trace
+from homeassistant.components.conversation.chat_log import (
+    AssistantContent,
+    async_get_chat_log,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_API_KEY, CONF_LLM_HASS_API, MATCH_ALL
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError, TemplateError
-from homeassistant.helpers import device_registry as dr, intent, llm
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import chat_session, device_registry as dr, intent, llm
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.util import ulid as ulid_util
 
 from . import CustomConversationConfigEntry
-from .api import CustomLLMAPI, IntentTool
+from .api import IntentTool
+from .cc_llm import async_update_llm_data
 from .const import (
     CONF_AGENTS_SECTION,
     CONF_BASE_URL,
@@ -56,17 +56,95 @@ from .const import (
     CONVERSATION_STARTED_EVENT,
     DOMAIN,
     HOME_ASSISTANT_AGENT,
-    LLM_API_ID,
     LOGGER,
     RECOMMENDED_CHAT_MODEL,
     RECOMMENDED_MAX_TOKENS,
     RECOMMENDED_TEMPERATURE,
     RECOMMENDED_TOP_P,
 )
-from .prompt_manager import PromptContext, PromptManager
+from .prompt_manager import PromptManager
 
 # Max number of back and forth with the LLM to generate a response
 MAX_TOOL_ITERATIONS = 10
+
+
+def _get_llm_details(messages: list[ChatCompletionMessageParam]) -> dict:
+    """Get the LLM details from the messages."""
+    llm_details = {}
+    new_tags = []
+    for message in messages:
+        if message.get("role") == "assistant" and message.get("tool_calls"):
+            if "tool_calls" not in llm_details:
+                llm_details["tool_calls"] = []
+            for tool_call in message["tool_calls"]:
+                tool_call_data = {
+                    "tool_name": tool_call["function"]["name"],
+                    "tool_args": tool_call["function"]["arguments"],
+                    "tool_call_id": tool_call["id"],
+                }
+                llm_details["tool_calls"].append(tool_call_data)
+                new_tags.append(f"intent:{tool_call['function']['name']}")
+        if message.get("role") == "tool":
+            message_tool_call_id = message.get("tool_call_id")
+            found_match = False
+
+            if message_tool_call_id:
+                # Message has an ID, find the matching request
+                for tool_call_request in llm_details.get("tool_calls", []):
+                    if tool_call_request.get("tool_call_id") == message_tool_call_id:
+                        tool_call_request["tool_response"] = json.loads(
+                            message["content"]
+                        )
+                        new_tags.extend(
+                            [
+                                f"affected_entity:{entity['id']}"
+                                for entity in tool_call_request["tool_response"]
+                                .get("data", {})
+                                .get("success", [])
+                            ]
+                        )
+                        new_tags.extend(
+                            [
+                                f"failed_entity:{entity['id']}"
+                                for entity in tool_call_request["tool_response"]
+                                .get("data", {})
+                                .get("failure", [])
+                            ]
+                        )
+                        found_match = True
+                        break
+            else:
+                # Message has NO ID, find the first request without an ID and without a response
+                for tool_call_request in llm_details.get("tool_calls", []):
+                    if (
+                        tool_call_request.get("tool_call_id") == ""
+                        and "tool_response" not in tool_call_request
+                    ):
+                        tool_call_request["tool_response"] = json.loads(
+                            message["content"]
+                        )
+                        new_tags.extend(
+                            [
+                                f"affected_entity:{entity['id']}"
+                                for entity in tool_call_request["tool_response"]
+                                .get("data", {})
+                                .get("success", [])
+                            ]
+                        )
+                        new_tags.extend(
+                            [
+                                f"failed_entity:{entity['id']}"
+                                for entity in tool_call_request["tool_response"]
+                                .get("data", {})
+                                .get("failure", [])
+                            ]
+                        )
+                        found_match = True
+                        break
+
+            if not found_match:
+                LOGGER.warning("Could not match tool response message: %s", message)
+    return llm_details, new_tags
 
 
 async def async_setup_entry(
@@ -100,6 +178,71 @@ def _format_tool(
     return ChatCompletionToolParam(type="function", function=tool_spec)
 
 
+def _convert_message_to_param(message: Message) -> ChatCompletionMessageParam:
+    """Convert from class to TypedDict."""
+    tool_calls: list[ChatCompletionMessageToolCallParam] = []
+    if message.tool_calls:
+        tool_calls = [
+            ChatCompletionMessageToolCallParam(
+                id=tool_call.id,
+                function=Function(
+                    arguments=tool_call.function.arguments,
+                    name=tool_call.function.name,
+                ),
+                type=tool_call.type,
+            )
+            for tool_call in message.tool_calls
+        ]
+    param = ChatCompletionAssistantMessageParam(
+        role=message.role,
+        content=message.content,
+    )
+    if tool_calls:
+        param["tool_calls"] = tool_calls
+    return param
+
+
+def _convert_content_to_param(
+    content: conversation.Content,
+) -> ChatCompletionMessageParam:
+    """Convert any native chat message for this agent to the native format."""
+    if content.role == "tool_result":
+        assert type(content) is conversation.ToolResultContent
+        return ChatCompletionToolMessageParam(
+            role="tool",
+            tool_call_id=content.tool_call_id,
+            content=json.dumps(content.tool_result),
+        )
+    if content.role != "assistant" or not content.tool_calls:
+        role = content.role
+        if role == "system":
+            role = "developer"
+        return cast(
+            ChatCompletionMessageParam,
+            {
+                "role": content.role,
+                "content": content.content,
+            },
+        )
+
+    assert type(content) is conversation.AssistantContent
+    return ChatCompletionAssistantMessageParam(
+        role="assistant",
+        content=content.content,
+        tool_calls=[
+            ChatCompletionMessageToolCallParam(
+                id=tool_call.id,
+                function=Function(
+                    arguments=json.dumps(tool_call.tool_args),
+                    name=tool_call.tool_name,
+                ),
+                type="function",
+            )
+            for tool_call in content.tool_calls
+        ],
+    )
+
+
 class CustomConversationEntity(
     conversation.ConversationEntity, conversation.AbstractConversationAgent
 ):
@@ -117,7 +260,6 @@ class CustomConversationEntity(
         """Initialize the agent."""
         self.entry = entry
         self.hass = hass
-        self.history: dict[str, list[ChatCompletionMessageParam]] = {}
         self._attr_unique_id = entry.entry_id
         self._attr_device_info = dr.DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
@@ -170,12 +312,22 @@ class CustomConversationEntity(
         conversation.async_unset_agent(self.hass, self.entry)
         await super().async_will_remove_from_hass()
 
-    @observe(name="cc_process")
+    @observe(name="cc_async_process")
     async def async_process(
         self, user_input: conversation.ConversationInput
     ) -> conversation.ConversationResult:
+        """Process a sentence."""
+        return await self._async_handle_message(user_input)
+
+    @observe(name="cc_handle_message")
+    async def _async_handle_message(
+        self,
+        user_input: conversation.ConversationInput,
+    ) -> conversation.ConversationResult:
         """Process enabled agents started with the built in agent."""
         LOGGER.debug("Processing user input: %s", user_input)
+        assert user_input.agent_id
+        options = self.entry.options
         device_registry = dr.async_get(self.hass)
         device = device_registry.async_get(user_input.device_id)
         device_data = {
@@ -188,7 +340,7 @@ class CustomConversationEntity(
             f"device_name:{device_data['device_name']}",
             f"device_area:{device_data['device_area']}",
         ]
-        user_configured_tags = self.entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
+        user_configured_tags = options.get(CONF_LANGFUSE_SECTION, {}).get(
             CONF_LANGFUSE_TAGS, []
         )
         new_tags = user_configured_tags + device_tags
@@ -215,45 +367,75 @@ class CustomConversationEntity(
             response=intent_response, conversation_id=user_input.conversation_id
         )
 
-        if self.entry.options.get(CONF_AGENTS_SECTION, {}).get(CONF_ENABLE_HASS_AGENT):
+        if options.get(CONF_AGENTS_SECTION, {}).get(CONF_ENABLE_HASS_AGENT):
             LOGGER.debug("Processing with Home Assistant agent")
-            result = await self._async_process_hass(user_input)
-            LOGGER.debug("Received response: %s", result.response.speech)
-            if result.response.error_code is None:
-                await self._async_fire_conversation_ended(
-                    result, HOME_ASSISTANT_AGENT, user_input, device_data=device_data
-                )
-                new_tags = ["handling_agent:home_assistant"]
-                if result.response.intent.intent_type is not None:
-                    new_tags.append(f"intent:{result.response.intent.intent_type}")
-                if len(result.response.success_results) > 0:
-                    for success_result in result.response.success_results:
-                        new_tags.append(f"affected_entity:{success_result.id}")
-                langfuse_context.update_current_observation(output=result.as_dict())
-                langfuse_context.update_current_trace(tags=new_tags)
-                return result
-
-        if self.entry.options.get(CONF_AGENTS_SECTION, {}).get(CONF_ENABLE_LLM_AGENT):
-            LOGGER.debug("Processing with LLM agent")
-            try:
-                result, llm_data = await self._async_process_llm(user_input)
+            with (
+                chat_session.async_get_chat_session(
+                    self.hass, user_input.conversation_id
+                ) as session,
+                async_get_chat_log(self.hass, session, user_input) as chat_log,
+            ):
+                result = await self._async_handle_message_with_hass(user_input)
                 LOGGER.debug("Received response: %s", result.response.speech)
                 if result.response.error_code is None:
                     await self._async_fire_conversation_ended(
                         result,
-                        "LLM",
-                        user_input,
-                        llm_data=llm_data,
-                        device_data=device_data,
-                    )
-                    langfuse_context.update_current_trace(tags=["handling_agent:llm"])
-                else:
-                    await self._async_fire_conversation_error(
-                        result.response.error_code,
-                        "LLM",
+                        HOME_ASSISTANT_AGENT,
                         user_input,
                         device_data=device_data,
                     )
+                    new_tags = ["handling_agent:home_assistant"]
+                    if result.response.intent.intent_type is not None:
+                        new_tags.append(f"intent:{result.response.intent.intent_type}")
+                    if len(result.response.success_results) > 0:
+                        for success_result in result.response.success_results:
+                            new_tags.append(f"affected_entity:{success_result.id}")
+                    langfuse_context.update_current_observation(output=result.as_dict())
+                    langfuse_context.update_current_trace(tags=new_tags)
+                    async for _tool_result in chat_log.async_add_assistant_content(
+                        AssistantContent(
+                            agent_id=user_input.agent_id,
+                            content=result.response.speech,
+                        )
+                    ):
+                        pass
+                    return conversation.ConversationResult(
+                        response=result.response,
+                        conversation_id=session.conversation_id,
+                    )
+
+        if options.get(CONF_AGENTS_SECTION, {}).get(CONF_ENABLE_LLM_AGENT):
+            LOGGER.debug("Processing with LLM agent")
+            try:
+                with (
+                    chat_session.async_get_chat_session(
+                        self.hass, user_input.conversation_id
+                    ) as session,
+                    async_get_chat_log(self.hass, session, user_input) as chat_log,
+                ):
+                    LOGGER.debug("Trying to handle the message with LLM")
+                    result, llm_data = await self._async_handle_message_with_llm(
+                        user_input, chat_log
+                    )
+                    LOGGER.debug("Received response: %s", result.response.speech)
+                    if result.response.error_code is None:
+                        await self._async_fire_conversation_ended(
+                            result,
+                            "LLM",
+                            user_input,
+                            llm_data=llm_data,
+                            device_data=device_data,
+                        )
+                        langfuse_context.update_current_trace(
+                            tags=["handling_agent:llm"]
+                        )
+                    else:
+                        await self._async_fire_conversation_error(
+                            result.response.error_code,
+                            "LLM",
+                            user_input,
+                            device_data=device_data,
+                        )
             except RateLimitError as err:
                 error_message = getattr(err, "body", str(err))
                 await self._async_fire_conversation_error(
@@ -274,9 +456,10 @@ class CustomConversationEntity(
                 raise HomeAssistantError("Error talking to OpenAI API") from err
         return result
 
-    @observe(name="cc_process_hass")
-    async def _async_process_hass(
-        self, user_input: conversation.ConversationInput
+    @observe(name="cc_handle_message_with_hass")
+    async def _async_handle_message_with_hass(
+        self,
+        user_input: conversation.ConversationInput,
     ) -> conversation.ConversationResult:
         """Process a sentence with the Home Assistant agent."""
         hass_agent = conversation.async_get_agent(self.hass, HOME_ASSISTANT_AGENT)
@@ -316,151 +499,43 @@ class CustomConversationEntity(
         langfuse_context.update_current_observation(output=response.as_dict())
         return response
 
-    @observe(name="cc_process_llm")
-    async def _async_process_llm(
-        self, user_input: conversation.ConversationInput
+    @observe(name="cc_handle_message_with_llm")
+    async def _async_handle_message_with_llm(
+        self,
+        user_input: conversation.ConversationInput,
+        chat_log: conversation.ChatLog,
     ) -> tuple[conversation.ConversationResult, dict]:
         """Process a sentence with the llm."""
-        options = self.entry.options
-        intent_response = intent.IntentResponse(language=user_input.language)
-        llm_api: CustomLLMAPI | None = None
-        tools: list[ChatCompletionToolParam] | None = None
-        user_name: str | None = None
-        llm_context = llm.LLMContext(
-            platform=DOMAIN,
-            context=user_input.context,
-            user_prompt=user_input.text,
-            language=user_input.language,
-            assistant=conversation.DOMAIN,
-            device_id=user_input.device_id,
-        )
-        llm_details = {}
-        if (
-            user_input.context
-            and user_input.context.user_id
-            and (
-                user := await self.hass.auth.async_get_user(user_input.context.user_id)
-            )
-        ):
-            user_name = user.name
-        if llm_api := options.get(CONF_LLM_HASS_API):
-            try:
-                if llm_api == LLM_API_ID:
-                    LOGGER.debug("Using Custom LLM API for request")
-                    api_instance = CustomLLMAPI(
-                        self.hass, user_name, conversation_config_entry=self.entry
-                    )
-                    if (
-                        langfuse_client := self.hass.data.get(DOMAIN, {})
-                        .get(self.entry.entry_id, {})
-                        .get("langfuse_client")
-                    ):
-                        LOGGER.debug("Setting langfuse client for Custom LLM API")
-                        api_instance.set_langfuse_client(langfuse_client)
-                    llm_api = await api_instance.async_get_api_instance(llm_context)
-                else:
-                    LOGGER.debug("Using LLM API with ID: %s", llm_api.api.id)
-                    llm_api = await llm.async_get_api(
-                        self.hass,
-                        llm_api,
-                        llm_context,
-                    )
-                if llm_api.tools:
-                    LOGGER.debug("LLM API tools available: %s", llm_api.tools)
-            except HomeAssistantError as err:
-                LOGGER.error("Error getting LLM API: %s", err)
-                intent_response.async_set_error(
-                    intent.IntentResponseErrorCode.UNKNOWN,
-                    "Error preparing LLM API",
-                )
-                return conversation.ConversationResult(
-                    response=intent_response, conversation_id=user_input.conversation_id
-                )
-            tools = [
-                _format_tool(tool, llm_api.custom_serializer) for tool in llm_api.tools
-            ]
 
-        if user_input.conversation_id is None:
-            conversation_id = ulid_util.ulid_now()
-            messages = []
-
-        elif user_input.conversation_id in self.history:
-            conversation_id = user_input.conversation_id
-            messages = self.history[conversation_id]
-
-        else:
-            # Conversation IDs are ULIDs. We generate a new one if not provided.
-            # If an old OLID is passed in, we will generate a new one to indicate
-            # a new conversation was started. If the user picks their own, they
-            # want to track a conversation and we respect it.
-            try:
-                ulid_util.ulid_to_bytes(user_input.conversation_id)
-                conversation_id = ulid_util.ulid_now()
-            except ValueError:
-                conversation_id = user_input.conversation_id
-
-            messages = []
-        prompt_object = None
         try:
-            prompt_context = PromptContext(
-                hass=self.hass,
-                ha_name=self.hass.config.location_name,
-                user_name=user_name,
+            LOGGER.debug("Updating LLM Data")
+            prompt_object = await async_update_llm_data(
+                self.hass,
+                user_input,
+                self.entry,
+                chat_log,
+                self.prompt_manager,
+                self.entry.options.get(CONF_LLM_HASS_API),
             )
-            if llm_api and isinstance(llm_api.api, CustomLLMAPI):
-                # The LLM API is the CustomLLMAPI, so use its prompt. The prompt manager
-                # will pull in the  base prompt if langfuse is disabled.
-                prompt = await llm_api.api_prompt
-                # If langfuse is successfully used, we'll get back a tuple that contains a prompt object as well
-                if isinstance(prompt, tuple):
-                    LOGGER.debug("Retrieved Langfuse Prompt")
-                    prompt_object, prompt = prompt
-                LOGGER.debug("LLM API prompt: %s", prompt)
-            elif not llm_api:
-                # No API is enabled - just get the base prompt
-                prompt = await self.prompt_manager.async_get_base_prompt(
-                    prompt_context, self.entry
+            if prompt_object:
+                LOGGER.debug(
+                    "Prompt name: %s, version: %s",
+                    prompt_object.name,
+                    prompt_object.version,
                 )
-                # If langfuse is successfully used, we'll get back a tuple that contains a prompt object as well
-                if isinstance(prompt, tuple):
-                    LOGGER.debug("Retrieved Basic Langfuse Prompt")
-                    prompt_object, prompt = prompt
-                LOGGER.debug("Base prompt: %s", prompt)
             else:
-                # We're using a different API, so we need to combine the base prompt with the API prompt
-                base_prompt = await self.prompt_manager.async_get_base_prompt(
-                    prompt_context, self.entry
-                )
-                prompt_parts = [base_prompt]
-                prompt_parts.append(llm_api.api_prompt)
-                prompt = "\n".join(prompt_parts)
-                LOGGER.debug("Combined prompt: %s", prompt)
+                LOGGER.debug("No prompt object found")
 
-        except TemplateError as err:
-            LOGGER.error("Error rendering prompt: %s", err)
-            intent_response = intent.IntentResponse(language=user_input.language)
-            intent_response.async_set_error(
-                intent.IntentResponseErrorCode.UNKNOWN,
-                "Sorry, I had a problem with my template",
-            )
-            return conversation.ConversationResult(
-                response=intent_response, conversation_id=conversation_id
-            )
-
-        # Create a copy of the variable because we attach it to the trace
-        messages = [
-            ChatCompletionSystemMessageParam(role="system", content=prompt),
-            *messages[1:],
-            ChatCompletionUserMessageParam(role="user", content=user_input.text),
-        ]
-
-        LOGGER.debug("Prompt: %s", messages)
-        LOGGER.debug("Tools: %s", tools)
-        trace.async_conversation_trace_append(
-            trace.ConversationTraceEventType.AGENT_DETAIL,
-            {"messages": messages, "tools": llm_api.tools if llm_api else None},
-        )
-
+        except conversation.ConverseError as err:
+            return err.as_conversation_result()
+        options = self.entry.options
+        tools: list[ChatCompletionToolParam] | None = None
+        if chat_log.llm_api:
+            tools = [
+                _format_tool(tool, chat_log.llm_api.custom_serializer)
+                for tool in chat_log.llm_api.tools
+            ]
+        messages = [_convert_content_to_param(content) for content in chat_log.content]
         # To prevent infinite loops, we limit the number of iterations
         langfuse_context.update_current_observation(prompt=prompt_object)
         for _iteration in range(MAX_TOOL_ITERATIONS):
@@ -469,7 +544,7 @@ class CustomConversationEntity(
                     config_options=options,
                     messages=messages,
                     tools=tools,
-                    conversation_id=conversation_id,
+                    conversation_id=chat_log.conversation_id,
                     prompt=prompt_object,
                 )
                 # Assistant-role responses have the content field set to None, but Google's OpenAI compatible endpoint can't handle that
@@ -478,7 +553,7 @@ class CustomConversationEntity(
                     result.choices[0].message.role == "assistant"
                     and result.choices[0].message.content is None
                 ):
-                    result.choices[0].message.content = ""
+                    result.choices[0].message.content = "Tool called"
 
                 LOGGER.debug("LLM API response: %s", result)
             except RateLimitError as err:
@@ -492,87 +567,51 @@ class CustomConversationEntity(
 
             LOGGER.debug("Response %s", result)
             response = result.choices[0].message
+            messages.append(_convert_message_to_param(response))
+            tool_calls: list[llm.ToolInput] | None = None
 
-            def message_convert(
-                message: Message,
-            ) -> ChatCompletionMessageParam:
-                """Convert from class to TypedDict."""
-                tool_calls: list[ChatCompletionMessageToolCallParam] = []
-                if message.tool_calls:
+            if options.get(CONF_LLM_HASS_API):
+                if response.tool_calls:
                     tool_calls = [
-                        ChatCompletionMessageToolCallParam(
+                        llm.ToolInput(
                             id=tool_call.id,
-                            function=Function(
-                                arguments=tool_call.function.arguments,
-                                name=tool_call.function.name,
-                            ),
-                            type=tool_call.type,
+                            tool_name=tool_call.function.name,
+                            tool_args=json.loads(tool_call.function.arguments),
                         )
-                        for tool_call in message.tool_calls
+                        for tool_call in response.tool_calls
                     ]
-                param = ChatCompletionAssistantMessageParam(
-                    role=message.role,
-                    content=message.content,
+
+                messages.extend(
+                    [
+                        _convert_content_to_param(tool_response)
+                        async for tool_response in chat_log.async_add_assistant_content(
+                            conversation.AssistantContent(
+                                agent_id=user_input.agent_id,
+                                content=response.content or "",
+                                tool_calls=tool_calls,
+                            )
+                        )
+                    ]
                 )
-                if tool_calls:
-                    param["tool_calls"] = tool_calls
-                return param
-
-            messages.append(message_convert(response))
-            tool_calls = response.tool_calls
-
-            if not tool_calls or not llm_api:
-                break
-
-            for tool_call in tool_calls:
-                tool_input = llm.ToolInput(
-                    tool_name=tool_call.function.name,
-                    tool_args=json.loads(tool_call.function.arguments),
-                )
-                tool_call_data = {
-                    "tool_name": tool_call.function.name,
-                    "tool_args": tool_call.function.arguments,
-                }
-                LOGGER.debug(
-                    "Tool call: %s(%s)", tool_input.tool_name, tool_input.tool_args
-                )
-
-                try:
-                    tool_response = await llm_api.async_call_tool(tool_input)
-                    # Save a copy of the tool response before deleting any card data to save tokens
-                    tool_call_data["tool_response"] = tool_response.copy()
-                    # Tag langfuse traces with the intent as the tool call, and the success response as affected entities,
-                    # matching the way it's done for hass-handled intents
-                    new_tags = ["intent:" + tool_input.tool_name]
-                    if tool_response.get("data", {}).get("success"):
-                        for entity in tool_response["data"]["success"]:
-                            new_tags.extend([f"affected_entity:{entity['id']}"])
-                    langfuse_context.update_current_trace(tags=new_tags)
-                    if tool_response.get("card"):
-                        del tool_response["card"]
-                except (HomeAssistantError, vol.Invalid) as e:
-                    tool_response = {"error": type(e).__name__}
-                    if str(e):
-                        tool_response["error_text"] = str(e)
-
-                LOGGER.debug("Tool response: %s", tool_response)
-                messages.append(
-                    ChatCompletionToolMessageParam(
-                        role="tool",
-                        tool_call_id=tool_call.id,
-                        content=json.dumps(tool_response),
+            else:
+                chat_log.async_add_assistant_content_without_tools(
+                    conversation.AssistantContent(
+                        agent_id=user_input.agent_id,
+                        content=response.content or "",
                     )
                 )
-                if "tool_calls" not in llm_details:
-                    llm_details["tool_calls"] = []
-                llm_details["tool_calls"].append(tool_call_data)
 
-        self.history[conversation_id] = messages
+            if not tool_calls:
+                break
 
         intent_response = intent.IntentResponse(language=user_input.language)
+        llm_details, new_tags = _get_llm_details(messages)
+        langfuse_context.update_current_trace(tags=new_tags)
         intent_response.async_set_speech(response.content or "")
         return conversation.ConversationResult(
-            response=intent_response, conversation_id=conversation_id
+            response=intent_response,
+            conversation_id=chat_log.conversation_id,
+            continue_conversation=chat_log.continue_conversation,
         ), llm_details
 
     @observe(name="cc_generate_completion")

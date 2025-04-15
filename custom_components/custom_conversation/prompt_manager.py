@@ -9,8 +9,6 @@ from typing import Any
 from langfuse import Langfuse
 from langfuse.api import CreateScoreConfigRequest
 from langfuse.api.resources.commons.types import ScoreDataType
-from langfuse.api import CreateScoreConfigRequest
-from langfuse.api.resources.commons.types import ScoreDataType
 from langfuse.decorators import observe
 from langfuse.model import Prompt
 
@@ -32,7 +30,6 @@ from .const import (
     CONF_LANGFUSE_HOST,
     CONF_LANGFUSE_PUBLIC_KEY,
     CONF_LANGFUSE_SCORE_ENABLED,
-    CONF_LANGFUSE_SCORE_ENABLED,
     CONF_LANGFUSE_SECRET_KEY,
     CONF_LANGFUSE_SECTION,
     CONF_LANGFUSE_TRACING_ENABLED,
@@ -50,9 +47,6 @@ from .const import (
     DEFAULT_BASE_PROMPT,
     DEFAULT_INSTRUCTIONS_PROMPT,
     DEFAULT_PROMPT_NO_ENABLED_ENTITIES,
-    LANGFUSE_SCORE_NAME,
-    LANGFUSE_SCORE_NEGATIVE,
-    LANGFUSE_SCORE_POSITIVE,
     LANGFUSE_SCORE_NAME,
     LANGFUSE_SCORE_NEGATIVE,
     LANGFUSE_SCORE_POSITIVE,
@@ -104,7 +98,7 @@ class PromptManager:
             key, default
         )
 
-    @observe()
+    @observe(capture_input=False)
     async def _get_langfuse_prompt(
         self, prompt_id: str, variables: dict[str, Any]
     ) -> tuple[Prompt, str] | None:
@@ -118,7 +112,7 @@ class PromptManager:
             LOGGER.error("Error getting Langfuse prompt: %s", err)
             return None
 
-    @observe()
+    @observe(capture_input=False)
     async def async_get_base_prompt(
         self, context: PromptContext, config_entry: ConfigEntry | None = None
     ) -> tuple[Prompt, str] | str:
@@ -163,7 +157,7 @@ class PromptManager:
             LOGGER.error("Error rendering base prompt: %s", err)
             raise
 
-    @observe()
+    @observe(capture_input=False)
     async def get_api_prompt(
         self, context: PromptContext, config_entry: ConfigEntry | None = None
     ) -> tuple[Prompt, str] | str:
@@ -321,6 +315,7 @@ class LangfuseClient:
                 )
 
             client = await hass.async_add_executor_job(create_client)
+            score_config = None
             # Ensure the score config is created if it's enabled
             if config_entry.options.get(CONF_LANGFUSE_SECTION, {}).get(
                 CONF_LANGFUSE_SCORE_ENABLED
@@ -357,12 +352,12 @@ class LangfuseClient:
                             request=score_config_request
                         )
                     )
-            return cls(hass, client, prompts, score_config.id)
+            return cls(hass, client, prompts, score_config.id if score_config else None)
         except Exception as err:
             LOGGER.error("Error initializing Langfuse client: %s", err)
             raise LangfuseInitError("Failed to initialize Langfuse client") from err
 
-    @observe()
+    @observe(capture_input=False)
     async def get_prompt(
         self, prompt_id: str, variables: dict[str, Any]
     ) -> tuple[Prompt, str]:
