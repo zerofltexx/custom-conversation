@@ -1,10 +1,7 @@
-import asyncio # Added for mock generator
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+"""Unit tests for the Custom Conversation component."""
+from unittest.mock import AsyncMock, Mock, patch
 
 from litellm import RateLimitError
-# Only import the top-level chunk type we definitely need
-from litellm.types.utils import StreamingChatCompletionChunk
-import pytest
 import pytest
 
 from custom_components.custom_conversation import CustomConversationConfigEntry
