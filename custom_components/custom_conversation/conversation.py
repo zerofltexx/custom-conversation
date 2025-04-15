@@ -210,7 +210,7 @@ async def _transform_litellm_stream(
                         llm.ToolInput(
                             id=current_tool_call.get("id"),
                             tool_name=current_tool_call.get("name"),
-                            tool_args=json.loads(current_tool_call.get("args", "{}")),
+                            tool_args=json.loads(current_tool_call.get("tool_args", "{}")),
                         )
                     ]
                 }
@@ -237,7 +237,7 @@ async def _transform_litellm_stream(
             raise ValueError("Expected delta with tool call")
 
         if current_tool_call and delta_tool_call.index == current_tool_call["index"]:
-            current_tool_call["args"] += delta_tool_call.function.arguments or ""
+            current_tool_call["tool_args"] += delta_tool_call.function.arguments or ""
             continue
 
         # We got a tool call with new index, so we need to yield the previous
@@ -259,7 +259,7 @@ async def _transform_litellm_stream(
             "index": delta_tool_call.index,
             "id": delta_tool_call.id,
             "name": delta_tool_call.function.name,
-            "args": delta_tool_call.function.arguments or "",
+            "tool_args": delta_tool_call.function.arguments or "",
         }
 
 class CustomConversationEntity(
