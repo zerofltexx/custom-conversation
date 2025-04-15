@@ -67,6 +67,7 @@ from .prompt_manager import PromptManager
 # Max number of back and forth with the LLM to generate a response
 MAX_TOOL_ITERATIONS = 10
 
+
 def _get_llm_details(messages: list[ChatCompletionMessageParam]) -> dict:
     """Get the LLM details from the messages."""
     llm_details = {}
@@ -91,24 +92,60 @@ def _get_llm_details(messages: list[ChatCompletionMessageParam]) -> dict:
                 # Message has an ID, find the matching request
                 for tool_call_request in llm_details.get("tool_calls", []):
                     if tool_call_request.get("tool_call_id") == message_tool_call_id:
-                        tool_call_request["tool_response"] = json.loads(message["content"])
-                        new_tags.extend([f"affected_entity:{entity['id']}" for entity in tool_call_request["tool_response"].get("data", {}).get("success", [])])
-                        new_tags.extend([f"failed_entity:{entity['id']}" for entity in tool_call_request["tool_response"].get("data", {}).get("failure", [])])
+                        tool_call_request["tool_response"] = json.loads(
+                            message["content"]
+                        )
+                        new_tags.extend(
+                            [
+                                f"affected_entity:{entity['id']}"
+                                for entity in tool_call_request["tool_response"]
+                                .get("data", {})
+                                .get("success", [])
+                            ]
+                        )
+                        new_tags.extend(
+                            [
+                                f"failed_entity:{entity['id']}"
+                                for entity in tool_call_request["tool_response"]
+                                .get("data", {})
+                                .get("failure", [])
+                            ]
+                        )
                         found_match = True
                         break
             else:
                 # Message has NO ID, find the first request without an ID and without a response
                 for tool_call_request in llm_details.get("tool_calls", []):
-                    if tool_call_request.get("tool_call_id") == '' and "tool_response" not in tool_call_request:
-                        tool_call_request["tool_response"] = json.loads(message["content"])
-                        new_tags.extend([f"affected_entity:{entity['id']}" for entity in tool_call_request["tool_response"].get("data", {}).get("success", [])])
-                        new_tags.extend([f"failed_entity:{entity['id']}" for entity in tool_call_request["tool_response"].get("data", {}).get("failure", [])])
+                    if (
+                        tool_call_request.get("tool_call_id") == ""
+                        and "tool_response" not in tool_call_request
+                    ):
+                        tool_call_request["tool_response"] = json.loads(
+                            message["content"]
+                        )
+                        new_tags.extend(
+                            [
+                                f"affected_entity:{entity['id']}"
+                                for entity in tool_call_request["tool_response"]
+                                .get("data", {})
+                                .get("success", [])
+                            ]
+                        )
+                        new_tags.extend(
+                            [
+                                f"failed_entity:{entity['id']}"
+                                for entity in tool_call_request["tool_response"]
+                                .get("data", {})
+                                .get("failure", [])
+                            ]
+                        )
                         found_match = True
                         break
 
             if not found_match:
                 LOGGER.warning("Could not match tool response message: %s", message)
     return llm_details, new_tags
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -376,6 +413,7 @@ class CustomConversationEntity(
                     ) as session,
                     async_get_chat_log(self.hass, session, user_input) as chat_log,
                 ):
+                    LOGGER.debug("Trying to handle the message with LLM")
                     result, llm_data = await self._async_handle_message_with_llm(
                         user_input, chat_log
                     )
@@ -470,6 +508,7 @@ class CustomConversationEntity(
         """Process a sentence with the llm."""
 
         try:
+            LOGGER.debug("Updating LLM Data")
             prompt_object = await async_update_llm_data(
                 self.hass,
                 user_input,
@@ -478,6 +517,14 @@ class CustomConversationEntity(
                 self.prompt_manager,
                 self.entry.options.get(CONF_LLM_HASS_API),
             )
+            if prompt_object:
+                LOGGER.debug(
+                    "Prompt name: %s, version: %s",
+                    prompt_object.name,
+                    prompt_object.version,
+                )
+            else:
+                LOGGER.debug("No prompt object found")
 
         except conversation.ConverseError as err:
             return err.as_conversation_result()
