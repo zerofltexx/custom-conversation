@@ -1,6 +1,6 @@
 """Conversation support for Custom Conversation APIs."""
 
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
 import json
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, Union, cast
@@ -9,7 +9,7 @@ from langfuse.decorators import langfuse_context, observe
 
 if TYPE_CHECKING:
     from langfuse.types import PromptClient
-from litellm import OpenAIError, RateLimitError, completion
+from litellm import OpenAIError, RateLimitError, acompletion
 from litellm.types.completion import (
     ChatCompletionAssistantMessageParam,
     ChatCompletionMessageParam,
@@ -17,12 +17,13 @@ from litellm.types.completion import (
     ChatCompletionToolMessageParam,
 )
 from litellm.types.llms.openai import ChatCompletionToolParam, Function
-from litellm.types.utils import Message
+from litellm.types.utils import StreamingChatCompletionChunk
 from voluptuous_openapi import convert
 
 from homeassistant.components import assist_pipeline, conversation
 from homeassistant.components.conversation.chat_log import (
     AssistantContent,
+    AssistantContentDeltaDict,
     async_get_chat_log,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -86,64 +87,27 @@ def _get_llm_details(messages: list[ChatCompletionMessageParam]) -> dict:
                 new_tags.append(f"intent:{tool_call['function']['name']}")
         if message.get("role") == "tool":
             message_tool_call_id = message.get("tool_call_id")
-            found_match = False
-
-            if message_tool_call_id:
-                # Message has an ID, find the matching request
-                for tool_call_request in llm_details.get("tool_calls", []):
-                    if tool_call_request.get("tool_call_id") == message_tool_call_id:
-                        tool_call_request["tool_response"] = json.loads(
-                            message["content"]
-                        )
-                        new_tags.extend(
-                            [
-                                f"affected_entity:{entity['id']}"
-                                for entity in tool_call_request["tool_response"]
-                                .get("data", {})
-                                .get("success", [])
-                            ]
-                        )
-                        new_tags.extend(
-                            [
-                                f"failed_entity:{entity['id']}"
-                                for entity in tool_call_request["tool_response"]
-                                .get("data", {})
-                                .get("failure", [])
-                            ]
-                        )
-                        found_match = True
-                        break
-            else:
-                # Message has NO ID, find the first request without an ID and without a response
-                for tool_call_request in llm_details.get("tool_calls", []):
-                    if (
-                        tool_call_request.get("tool_call_id") == ""
-                        and "tool_response" not in tool_call_request
-                    ):
-                        tool_call_request["tool_response"] = json.loads(
-                            message["content"]
-                        )
-                        new_tags.extend(
-                            [
-                                f"affected_entity:{entity['id']}"
-                                for entity in tool_call_request["tool_response"]
-                                .get("data", {})
-                                .get("success", [])
-                            ]
-                        )
-                        new_tags.extend(
-                            [
-                                f"failed_entity:{entity['id']}"
-                                for entity in tool_call_request["tool_response"]
-                                .get("data", {})
-                                .get("failure", [])
-                            ]
-                        )
-                        found_match = True
-                        break
-
-            if not found_match:
-                LOGGER.warning("Could not match tool response message: %s", message)
+            for tool_call_request in llm_details.get("tool_calls", []):
+                if tool_call_request.get("tool_call_id") == message_tool_call_id:
+                    tool_call_request["tool_response"] = json.loads(
+                        message["content"]
+                    )
+                    new_tags.extend(
+                        [
+                            f"affected_entity:{entity['id']}"
+                            for entity in tool_call_request["tool_response"]
+                            .get("data", {})
+                            .get("success", [])
+                        ]
+                    )
+                    new_tags.extend(
+                        [
+                            f"failed_entity:{entity['id']}"
+                            for entity in tool_call_request["tool_response"]
+                            .get("data", {})
+                            .get("failure", [])
+                        ]
+                    )
     return llm_details, new_tags
 
 
@@ -176,30 +140,6 @@ def _format_tool(
     if tool.description:
         tool_spec["description"] = tool.description
     return ChatCompletionToolParam(type="function", function=tool_spec)
-
-
-def _convert_message_to_param(message: Message) -> ChatCompletionMessageParam:
-    """Convert from class to TypedDict."""
-    tool_calls: list[ChatCompletionMessageToolCallParam] = []
-    if message.tool_calls:
-        tool_calls = [
-            ChatCompletionMessageToolCallParam(
-                id=tool_call.id,
-                function=Function(
-                    arguments=tool_call.function.arguments,
-                    name=tool_call.function.name,
-                ),
-                type=tool_call.type,
-            )
-            for tool_call in message.tool_calls
-        ]
-    param = ChatCompletionAssistantMessageParam(
-        role=message.role,
-        content=message.content,
-    )
-    if tool_calls:
-        param["tool_calls"] = tool_calls
-    return param
 
 
 def _convert_content_to_param(
@@ -242,6 +182,85 @@ def _convert_content_to_param(
         ],
     )
 
+
+async def _transform_litellm_stream(
+    result: AsyncGenerator[StreamingChatCompletionChunk, None],
+) -> AsyncGenerator[AssistantContentDeltaDict, None]:
+    """Transform a LiteLLM delta stream into HA format."""
+    current_tool_call: dict | None = None
+
+    async for chunk in result:
+
+
+        LOGGER.debug("Received chunk: %s", chunk)
+        if not chunk.choices:
+            if chunk.usage:
+                LOGGER.debug("Received usage chunk: %s", chunk.usage)
+            continue
+
+        choice = chunk.choices[0]
+
+        if choice.finish_reason:
+            if current_tool_call:
+                # Gemini's OpenAI interface doesn't generate ids for tool calls, so we'll create one from the index
+                if not current_tool_call.get("id"):
+                    current_tool_call["id"] = f"call_{current_tool_call['index']}"
+                yield {
+                    "tool_calls": [
+                        llm.ToolInput(
+                            id=current_tool_call.get("id"),
+                            tool_name=current_tool_call.get("name"),
+                            tool_args=json.loads(current_tool_call.get("tool_args", "{}")),
+                        )
+                    ]
+                }
+            break
+
+        delta = choice.delta
+
+        # Yield messages that don't involve tool calls
+        if current_tool_call is None and not delta.tool_calls:
+            yield {
+                key: value
+                for key in ("role", "content")
+                if (value := getattr(delta, key)) is not None
+            }
+            continue
+
+        # When doing tool calls, we should always have a tool call
+        # object or we have gotten stopped above with a finish_reason set
+        if (
+            not delta.tool_calls
+            or not (delta_tool_call := delta.tool_calls[0])
+            or not delta_tool_call.function
+        ):
+            raise ValueError("Expected delta with tool call")
+
+        if current_tool_call and delta_tool_call.index == current_tool_call["index"]:
+            current_tool_call["tool_args"] += delta_tool_call.function.arguments or ""
+            continue
+
+        # We got a tool call with new index, so we need to yield the previous
+        if current_tool_call:
+            yield {
+                "tool_calls": [
+                    llm.ToolInput(
+                        id=current_tool_call["id"],
+                        tool_name=current_tool_call["name"],
+                        tool_args=json.loads(current_tool_call["tool_args"]),
+                    )
+                ]
+            }
+
+        # Gemini's OpenAI interface doesn't generate ids for tool calls, so we'll create one from the index
+        if not delta_tool_call.id:
+            delta_tool_call.id = f"call_{delta_tool_call.index}"
+        current_tool_call = {
+            "index": delta_tool_call.index,
+            "id": delta_tool_call.id,
+            "name": delta_tool_call.function.name,
+            "tool_args": delta_tool_call.function.arguments or "",
+        }
 
 class CustomConversationEntity(
     conversation.ConversationEntity, conversation.AbstractConversationAgent
@@ -535,86 +554,57 @@ class CustomConversationEntity(
                 _format_tool(tool, chat_log.llm_api.custom_serializer)
                 for tool in chat_log.llm_api.tools
             ]
-        messages = [_convert_content_to_param(content) for content in chat_log.content]
+        messages: list[ChatCompletionMessageParam] = [
+            _convert_content_to_param(content) for content in chat_log.content
+        ]
         # To prevent infinite loops, we limit the number of iterations
-        langfuse_context.update_current_observation(prompt=prompt_object)
         for _iteration in range(MAX_TOOL_ITERATIONS):
+            transformed_stream = await self._async_generate_completion(
+                config_options=options,
+                messages=messages,
+                tools=tools,
+                conversation_id=chat_log.conversation_id,
+                prompt=prompt_object,
+            )
+
             try:
-                result = await self._async_generate_completion(
-                    config_options=options,
-                    messages=messages,
-                    tools=tools,
-                    conversation_id=chat_log.conversation_id,
-                    prompt=prompt_object,
-                )
-                # Assistant-role responses have the content field set to None, but Google's OpenAI compatible endpoint can't handle that
-                # and returns an error. So we set it to an empty string.
-                if (
-                    result.choices[0].message.role == "assistant"
-                    and result.choices[0].message.content is None
-                ):
-                    result.choices[0].message.content = "Tool called"
-
-                LOGGER.debug("LLM API response: %s", result)
-            except RateLimitError as err:
-                LOGGER.error("Rate limit error: %s", err)
-                # Re-raise the error so the caller can handle it and fire a message on the event bus
-                raise
-            except OpenAIError as err:
-                LOGGER.error("Error talking to OpenAI: %s", err)
-                # Re-raise the error so the caller can handle it and fire a message on the event bus
-                raise
-
-            LOGGER.debug("Response %s", result)
-            response = result.choices[0].message
-            messages.append(_convert_message_to_param(response))
-            tool_calls: list[llm.ToolInput] | None = None
-
-            if options.get(CONF_LLM_HASS_API):
-                if response.tool_calls:
-                    tool_calls = [
-                        llm.ToolInput(
-                            id=tool_call.id,
-                            tool_name=tool_call.function.name,
-                            tool_args=json.loads(tool_call.function.arguments),
-                        )
-                        for tool_call in response.tool_calls
-                    ]
-
                 messages.extend(
                     [
-                        _convert_content_to_param(tool_response)
-                        async for tool_response in chat_log.async_add_assistant_content(
-                            conversation.AssistantContent(
-                                agent_id=user_input.agent_id,
-                                content=response.content or "",
-                                tool_calls=tool_calls,
-                            )
+                        _convert_content_to_param(content)
+                        async for content in chat_log.async_add_delta_content_stream(
+                            user_input.agent_id, transformed_stream
                         )
                     ]
                 )
-            else:
-                chat_log.async_add_assistant_content_without_tools(
-                    conversation.AssistantContent(
-                        agent_id=user_input.agent_id,
-                        content=response.content or "",
-                    )
-                )
+            except HomeAssistantError as err:
+                 LOGGER.error("Error processing LLM stream: %s", err)
+                 raise
+            except Exception as err:
+                 LOGGER.error("Unexpected error processing LLM stream: %s", err)
+                 raise HomeAssistantError("Error processing LLM response") from err
 
-            if not tool_calls:
-                break
+            if not chat_log.unresponded_tool_results:
+                 break
+
+        final_assistant_message = chat_log.content[-1]
+        if not isinstance(final_assistant_message, AssistantContent):
+             # This should not happen if the stream processed correctly
+             LOGGER.error("Last message in chat log is not AssistantContent: %s", final_assistant_message)
+             raise HomeAssistantError("LLM response processing failed")
 
         intent_response = intent.IntentResponse(language=user_input.language)
+        intent_response.async_set_speech(final_assistant_message.content or "")
+
         llm_details, new_tags = _get_llm_details(messages)
         langfuse_context.update_current_trace(tags=new_tags)
-        intent_response.async_set_speech(response.content or "")
+
         return conversation.ConversationResult(
             response=intent_response,
             conversation_id=chat_log.conversation_id,
             continue_conversation=chat_log.continue_conversation,
         ), llm_details
 
-    @observe(name="cc_generate_completion")
+    @observe(name="cc_generate_completion", as_type="generation")
     async def _async_generate_completion(
         self,
         config_options: MappingProxyType[str, Any],
@@ -622,45 +612,61 @@ class CustomConversationEntity(
         tools: list[ChatCompletionToolParam] | None,
         conversation_id: str,
         prompt: Union["PromptClient", None] = None,
-    ) -> Any:
-        """Generate a completion from the LLM."""
+    ) -> AsyncGenerator[AssistantContentDeltaDict, None]:
+        """Generate a completion stream from the LLM."""
         generation_id = langfuse_context.get_current_observation_id()
         existing_trace_id = langfuse_context.get_current_trace_id()
-        return await self.hass.async_add_executor_job(
-            lambda: completion(
-                api_key=self.entry.data.get(CONF_API_KEY),
-                base_url=self.entry.data.get(CONF_BASE_URL),
-                model=f"openai/{config_options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(CONF_CHAT_MODEL, RECOMMENDED_CHAT_MODEL)}",
-                messages=messages,
-                tools=tools,
-                max_tokens=config_options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
-                    CONF_MAX_TOKENS, RECOMMENDED_MAX_TOKENS
-                ),
-                top_p=config_options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
-                    CONF_TOP_P, RECOMMENDED_TOP_P
-                ),
-                temperature=config_options.get(CONF_LLM_PARAMETERS_SECTION, {}).get(
-                    CONF_TEMPERATURE, RECOMMENDED_TEMPERATURE
-                ),
-                user=conversation_id,
-                metadata={
-                    "generation_id": generation_id,
-                    "existing_trace_id": existing_trace_id,
-                    "generation_name": "cc_generate_completion",
-                    "prompt": prompt.__dict__ if prompt else None,
-                },
-                langfuse_secret_key=config_options.get(CONF_LANGFUSE_SECTION, {}).get(
-                    CONF_LANGFUSE_SECRET_KEY
-                ),
-                langfuse_public_key=config_options.get(CONF_LANGFUSE_SECTION, {}).get(
-                    CONF_LANGFUSE_PUBLIC_KEY
-                ),
-                langfuse_host=config_options.get(CONF_LANGFUSE_SECTION, {}).get(
-                    CONF_LANGFUSE_HOST
-                ),
-                callbacks=["langfuse"],
+
+        llm_params = config_options.get(CONF_LLM_PARAMETERS_SECTION, {})
+        langfuse_params = config_options.get(CONF_LANGFUSE_SECTION, {})
+
+        completion_kwargs = {
+            "api_key": self.entry.data.get(CONF_API_KEY),
+            "base_url": self.entry.data.get(CONF_BASE_URL),
+            "model": f"openai/{llm_params.get(CONF_CHAT_MODEL, RECOMMENDED_CHAT_MODEL)}",
+            "messages": messages,
+            "tools": tools,
+            "max_tokens": llm_params.get(CONF_MAX_TOKENS, RECOMMENDED_MAX_TOKENS),
+            "top_p": llm_params.get(CONF_TOP_P, RECOMMENDED_TOP_P),
+            "temperature": llm_params.get(CONF_TEMPERATURE, RECOMMENDED_TEMPERATURE),
+            "user": conversation_id,
+            "stream": True,
+            "metadata": {
+                "generation_id": generation_id,
+                "existing_trace_id": existing_trace_id,
+                "generation_name": "cc_generate_completion",
+                "prompt": prompt.__dict__ if prompt else None,
+            },
+            "langfuse_secret_key": langfuse_params.get(CONF_LANGFUSE_SECRET_KEY),
+            "langfuse_public_key": langfuse_params.get(CONF_LANGFUSE_PUBLIC_KEY),
+            "langfuse_host": langfuse_params.get(CONF_LANGFUSE_HOST),
+            "callbacks": ["langfuse"] if langfuse_params.get(CONF_LANGFUSE_TRACING_ENABLED) else None,
+        }
+        # The "content" field for assistant role messages can be None if it's a tool call, but Google's OpenAI
+        # endpoint can't handle this, so we set the content to "Tool Call"
+        for message in completion_kwargs["messages"]:
+            if message.get("role") == "assistant" and not message.get("content"):
+                message["content"] = "Tool Call"
+
+        try:
+            raw_stream: AsyncGenerator[StreamingChatCompletionChunk, None] = await acompletion(
+                 **completion_kwargs
             )
-        )
+            langfuse_context.update_current_observation(prompt=prompt)
+
+            return _transform_litellm_stream(raw_stream)
+
+        except RateLimitError as err:
+            LOGGER.error("Rate limit error during acompletion: %s", err)
+            raise
+        except OpenAIError as err:
+            LOGGER.error("API error during acompletion: %s", err)
+            raise
+        except Exception as err:
+            LOGGER.error("Unexpected error generating completion with acompletion: %s", err)
+            debug_kwargs = {k: v for k, v in completion_kwargs.items() if k not in ['api_key', 'langfuse_secret_key']}
+            LOGGER.debug("acompletion kwargs (sensitive info removed): %s", debug_kwargs)
+            raise HomeAssistantError("Error generating LLM completion stream") from err
 
     async def _async_entry_update_listener(
         self, hass: HomeAssistant, entry: ConfigEntry
@@ -703,7 +709,7 @@ class CustomConversationEntity(
 
     async def _async_fire_conversation_ended(
         self,
-        result: dict,
+        result: conversation.ConversationResult,
         agent: str,
         user_input: conversation.ConversationInput,
         llm_data: dict | None = None,

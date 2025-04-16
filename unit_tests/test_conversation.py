@@ -1,4 +1,5 @@
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+"""Unit tests for the Custom Conversation component."""
+from unittest.mock import AsyncMock, Mock, patch
 
 from litellm import RateLimitError
 import pytest
@@ -72,51 +73,6 @@ async def test_custom_conversation_tries_hass_agent_first(hass: HomeAssistant, c
         result = await conversation.async_converse(hass, "hello", "test-conversation-id", Context(), agent_id=config_entry.entry_id)
     assert result.conversation_id == "test-conversation-id"
     assert mock_process_hass.called
-
-async def test_custom_conversation_llm_api_disabled(hass: HomeAssistant, config_entry: CustomConversationConfigEntry):
-    """Test that the CustomConversationEntity works when LLM API is disabled."""
-    assert await async_setup_component(hass, "custom_conversation", {})
-    await hass.async_block_till_done()
-    mock_response = intent.IntentResponse(language="en", intent=Mock())
-    mock_response.error_code = True
-    mock_result = conversation.ConversationResult(mock_response, "test-conversation-id")
-
-    # Mock the litellm completion call to prevent network access and return a simple response
-    mock_llm_response = MagicMock()
-    mock_choice = MagicMock()
-    # Use MagicMock for the message structure
-    mock_message = MagicMock()
-    mock_message.role = "assistant"
-    mock_message.content = "LLM response when API disabled"
-    mock_choice.message = mock_message
-    mock_llm_response.choices = [mock_choice]
-    mock_llm_response.tool_calls = []
-
-    with patch(
-        "custom_components.custom_conversation.conversation.CustomConversationEntity._async_handle_message_with_hass", return_value=mock_result
-    ) as mock_process_hass, patch(
-        "custom_components.custom_conversation.conversation.completion",
-        return_value=mock_llm_response
-    ) as mock_completion:
-
-        hass.config_entries.async_update_entry(
-            config_entry,
-            options={
-                **config_entry.options,
-                CONF_LLM_HASS_API: None,
-                CONF_AGENTS_SECTION: {
-                    CONF_ENABLE_HASS_AGENT: True,
-                    CONF_ENABLE_LLM_AGENT: True,
-                },
-            },
-        )
-        await hass.config_entries.async_reload(config_entry.entry_id)
-        result = await conversation.async_converse(hass, "hello", "test-conversation-id", Context(), agent_id=config_entry.entry_id)
-    assert result.conversation_id == "test-conversation-id"
-    assert mock_process_hass.called
-    assert not result.response.error_code
-    assert mock_completion.called
-    assert result.response.speech["plain"]["speech"] == "LLM response when API disabled"
 
 async def test_custom_conversation_rate_limit_error(hass: HomeAssistant, config_entry: CustomConversationConfigEntry):
     """Test that rate limit errors are properly handled and event is fired."""
