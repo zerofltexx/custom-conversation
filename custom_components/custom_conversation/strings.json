@@ -3,8 +3,34 @@
     "step": {
       "user": {
         "data": {
-          "api_key": "API Key",
-          "base_url": "Base URL"
+          "primary_provider": "LLM Provider"
+        }
+      },
+      "credentials": {
+        "data": {
+          "primary_api_key": "API Key",
+          "primary_base_url": "Base URL"
+        }
+      },
+      "model": {
+        "data": {
+          "primary_chat_model": "Model"
+        }
+      },
+      "reconfigure_provider": {
+        "data": {
+          "primary_provider": "LLM Provider"
+        }
+      },
+      "reconfigure_credentials": {
+        "data": {
+          "primary_api_key": "API Key",
+          "primary_base_url": "Base URL"
+        }
+      },
+      "reconfigure_model": {
+        "data": {
+          "primary_chat_model": "Model"
         }
       }
     },
