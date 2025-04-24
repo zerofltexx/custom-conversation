@@ -2,22 +2,17 @@
 
 from __future__ import annotations
 
-import logging
-from types import MappingProxyType
 from typing import Any
 
 from litellm.exceptions import APIConnectionError, AuthenticationError
+from litellm.types.router import GenericLiteLLMParams
+from litellm.utils import ProviderConfigManager
 import voluptuous as vol
 
-from homeassistant.config_entries import (
-    ConfigEntry,
-    ConfigFlow,
-    ConfigFlowResult,
-    OptionsFlow,
-)
-from homeassistant.const import CONF_API_KEY, CONF_LLM_HASS_API
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
+from homeassistant.const import CONF_LLM_HASS_API
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import section
+from homeassistant.data_entry_flow import FlowResult, section
 from homeassistant.helpers import intent, llm
 from homeassistant.helpers.selector import (
     NumberSelector,
@@ -29,13 +24,10 @@ from homeassistant.helpers.selector import (
     TextSelector,
     TextSelectorConfig,
 )
-from homeassistant.helpers.typing import VolDictType
 
 from .const import (
     CONF_AGENTS_SECTION,
     CONF_API_PROMPT_BASE,
-    CONF_BASE_URL,
-    CONF_CHAT_MODEL,
     CONF_CUSTOM_PROMPTS_SECTION,
     CONF_ENABLE_HASS_AGENT,
     CONF_ENABLE_LANGFUSE,
@@ -54,8 +46,11 @@ from .const import (
     CONF_LANGFUSE_SECTION,
     CONF_LANGFUSE_TAGS,
     CONF_LANGFUSE_TRACING_ENABLED,
-    CONF_LLM_PARAMETERS_SECTION,
     CONF_MAX_TOKENS,
+    CONF_PRIMARY_API_KEY,
+    CONF_PRIMARY_BASE_URL,
+    CONF_PRIMARY_CHAT_MODEL,
+    CONF_PRIMARY_PROVIDER,
     CONF_PROMPT_BASE,
     CONF_PROMPT_DEVICE_KNOWN_LOCATION,
     CONF_PROMPT_DEVICE_UNKNOWN_LOCATION,
@@ -64,6 +59,7 @@ from .const import (
     CONF_PROMPT_TIMERS_UNSUPPORTED,
     CONF_TEMPERATURE,
     CONF_TOP_P,
+    CONFIG_VERSION,
     DEFAULT_API_PROMPT_BASE,
     DEFAULT_API_PROMPT_DEVICE_KNOWN_LOCATION,
     DEFAULT_API_PROMPT_DEVICE_UNKNOWN_LOCATION,
@@ -71,40 +67,24 @@ from .const import (
     DEFAULT_API_PROMPT_TIMERS_UNSUPPORTED,
     DEFAULT_BASE_PROMPT,
     DEFAULT_INSTRUCTIONS_PROMPT,
+    DEFAULT_MAX_TOKENS,
     DEFAULT_PROMPT_NO_ENABLED_ENTITIES,
+    DEFAULT_TEMPERATURE,
+    DEFAULT_TOP_P,
     DOMAIN,
-    LLM_API_ID,
-    RECOMMENDED_BASE_URL,
-    RECOMMENDED_CHAT_MODEL,
-    RECOMMENDED_MAX_TOKENS,
-    RECOMMENDED_TEMPERATURE,
-    RECOMMENDED_TOP_P,
+    LOGGER,
 )
+from .litellm_utils import get_valid_models
+from .providers import SUPPORTED_PROVIDERS, LiteLLMProvider, get_provider
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = LOGGER
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_API_KEY): str,
-        vol.Required(CONF_BASE_URL, default=RECOMMENDED_BASE_URL): str,
-    }
-)
-DEFAULT_IGNORED_INTENTS = llm.AssistAPI.IGNORE_INTENTS
-
-RECOMMENDED_OPTIONS = {
-    CONF_LLM_HASS_API: LLM_API_ID,
-    CONF_INSTRUCTIONS_PROMPT: DEFAULT_INSTRUCTIONS_PROMPT,
+DEFAULT_OPTIONS = {
+    CONF_LLM_HASS_API: "none",
     CONF_AGENTS_SECTION: {
         CONF_ENABLE_HASS_AGENT: True,
         CONF_ENABLE_LLM_AGENT: True,
     },
-    CONF_LLM_PARAMETERS_SECTION: {
-        CONF_CHAT_MODEL: RECOMMENDED_CHAT_MODEL,
-        CONF_MAX_TOKENS: RECOMMENDED_MAX_TOKENS,
-        CONF_TOP_P: RECOMMENDED_TOP_P,
-        CONF_TEMPERATURE: RECOMMENDED_TEMPERATURE,
-    },
-    CONF_IGNORED_INTENTS: DEFAULT_IGNORED_INTENTS,
     CONF_CUSTOM_PROMPTS_SECTION: {
         CONF_PROMPT_BASE: DEFAULT_BASE_PROMPT,
         CONF_INSTRUCTIONS_PROMPT: DEFAULT_INSTRUCTIONS_PROMPT,
@@ -131,362 +111,304 @@ RECOMMENDED_OPTIONS = {
 }
 
 
-def custom_conversation_config_option_schema(
-    hass: HomeAssistant,
-    options: dict[str, Any] | MappingProxyType[str, Any],
-) -> vol.Schema:
-    """Return a Schema for Custom Conversation Options."""
-    hass_apis: list[SelectOptionDict] = [
-        SelectOptionDict(
-            label="No control",
-            value="none",
-        )
-    ]
-    hass_apis.extend(
-        SelectOptionDict(
-            label=api.name,
-            value=api.id,
-        )
-        for api in llm.async_get_apis(hass)
-    )
-
-    # Get the recommended list of ignored intents from the default API
-    hass_recommended_ignored = llm.AssistAPI.IGNORE_INTENTS
-
-    intents: list[SelectOptionDict] = [
-        {
-            "value": intent.intent_type,
-            "label": f"{intent.intent_type} (Hass Recommended)"
-            if intent.intent_type in hass_recommended_ignored
-            else intent.intent_type,
-        }
-        for intent in intent.async_get(hass)
-    ]
-
-    # Basic options that are always shown
-    schema: VolDictType = {
-        vol.Optional(
-            CONF_INSTRUCTIONS_PROMPT,
-            description={
-                "suggested_value": options.get(
-                    CONF_INSTRUCTIONS_PROMPT, DEFAULT_INSTRUCTIONS_PROMPT
-                ),
-            },
-            default=DEFAULT_INSTRUCTIONS_PROMPT,
-        ): TemplateSelector(),
-        vol.Optional(
-            CONF_LLM_HASS_API,
-            description={"suggested_value": options.get(CONF_LLM_HASS_API)},
-            default="none",
-        ): SelectSelector(SelectSelectorConfig(options=hass_apis)),
-        # Add ignored intents selector
-        vol.Required(CONF_IGNORED_INTENTS_SECTION): section(
-            vol.Schema(
-                {
-                    vol.Required(
-                        CONF_IGNORED_INTENTS,
-                        default=options.get(CONF_IGNORED_INTENTS_SECTION, {}).get(
-                            CONF_IGNORED_INTENTS, DEFAULT_IGNORED_INTENTS
-                        ),
-                    ): SelectSelector(
-                        SelectSelectorConfig(options=intents, multiple=True)
-                    ),
-                }
-            )
-        ),
-        # Agent section
-        vol.Required(CONF_AGENTS_SECTION): section(
-            vol.Schema(
-                {
-                    vol.Required(
-                        CONF_ENABLE_HASS_AGENT,
-                        default=options.get("agents", {}).get(
-                            CONF_ENABLE_HASS_AGENT, True
-                        ),
-                    ): bool,
-                    vol.Required(
-                        CONF_ENABLE_LLM_AGENT,
-                        default=options.get("agents", {}).get(
-                            CONF_ENABLE_LLM_AGENT, True
-                        ),
-                    ): bool,
-                }
-            )
-        ),
-        vol.Required(CONF_LLM_PARAMETERS_SECTION): section(
-            vol.Schema(
-                {
-                    vol.Optional(
-                        CONF_CHAT_MODEL,
-                        description={
-                            "suggested_value": options.get(
-                                CONF_LLM_PARAMETERS_SECTION, {}
-                            ).get(CONF_CHAT_MODEL, RECOMMENDED_CHAT_MODEL)
-                        },
-                        default=RECOMMENDED_CHAT_MODEL,
-                    ): str,
-                    vol.Optional(
-                        CONF_MAX_TOKENS,
-                        description={
-                            "suggested_value": options.get(
-                                CONF_LLM_PARAMETERS_SECTION, {}
-                            ).get(CONF_MAX_TOKENS, RECOMMENDED_MAX_TOKENS)
-                        },
-                        default=RECOMMENDED_MAX_TOKENS,
-                    ): int,
-                    vol.Optional(
-                        CONF_TOP_P,
-                        description={
-                            "suggested_value": options.get(
-                                CONF_LLM_PARAMETERS_SECTION, {}
-                            ).get(CONF_TOP_P, RECOMMENDED_TOP_P)
-                        },
-                        default=RECOMMENDED_TOP_P,
-                    ): NumberSelector(NumberSelectorConfig(min=0, max=1, step=0.05)),
-                    vol.Optional(
-                        CONF_TEMPERATURE,
-                        description={
-                            "suggested_value": options.get(
-                                CONF_LLM_PARAMETERS_SECTION, {}
-                            ).get(CONF_TEMPERATURE, RECOMMENDED_TEMPERATURE)
-                        },
-                        default=RECOMMENDED_TEMPERATURE,
-                    ): NumberSelector(NumberSelectorConfig(min=0, max=2, step=0.05)),
-                }
-            )
-        ),
-        vol.Required(CONF_CUSTOM_PROMPTS_SECTION): section(
-            vol.Schema(
-                {
-                    vol.Optional(
-                        CONF_PROMPT_BASE,
-                        description={
-                            "suggested_value": options.get(
-                                CONF_CUSTOM_PROMPTS_SECTION, {}
-                            ).get(CONF_PROMPT_BASE, DEFAULT_BASE_PROMPT)
-                        },
-                        default=DEFAULT_BASE_PROMPT,
-                    ): TemplateSelector(),
-                    vol.Optional(
-                        CONF_PROMPT_NO_ENABLED_ENTITIES,
-                        default=options.get(CONF_CUSTOM_PROMPTS_SECTION, {}).get(
-                            CONF_PROMPT_NO_ENABLED_ENTITIES,
-                            DEFAULT_PROMPT_NO_ENABLED_ENTITIES,
-                        ),
-                    ): TextSelector(TextSelectorConfig(multiline=True)),
-                    vol.Optional(
-                        CONF_API_PROMPT_BASE,
-                        default=options.get(CONF_CUSTOM_PROMPTS_SECTION, {}).get(
-                            CONF_API_PROMPT_BASE, DEFAULT_API_PROMPT_BASE
-                        ),
-                    ): TextSelector(TextSelectorConfig(multiline=True)),
-                    vol.Optional(
-                        CONF_PROMPT_DEVICE_KNOWN_LOCATION,
-                        default=options.get(CONF_CUSTOM_PROMPTS_SECTION, {}).get(
-                            CONF_PROMPT_DEVICE_KNOWN_LOCATION,
-                            DEFAULT_API_PROMPT_DEVICE_KNOWN_LOCATION,
-                        ),
-                    ): TextSelector(TextSelectorConfig(multiline=True)),
-                    vol.Optional(
-                        CONF_PROMPT_DEVICE_UNKNOWN_LOCATION,
-                        default=options.get(CONF_CUSTOM_PROMPTS_SECTION, {}).get(
-                            CONF_PROMPT_DEVICE_UNKNOWN_LOCATION,
-                            DEFAULT_API_PROMPT_DEVICE_UNKNOWN_LOCATION,
-                        ),
-                    ): TextSelector(TextSelectorConfig(multiline=True)),
-                    vol.Optional(
-                        CONF_PROMPT_TIMERS_UNSUPPORTED,
-                        default=options.get(CONF_CUSTOM_PROMPTS_SECTION, {}).get(
-                            CONF_PROMPT_TIMERS_UNSUPPORTED,
-                            DEFAULT_API_PROMPT_TIMERS_UNSUPPORTED,
-                        ),
-                    ): TextSelector(TextSelectorConfig(multiline=True)),
-                    vol.Optional(
-                        CONF_PROMPT_EXPOSED_ENTITIES,
-                        default=options.get(CONF_CUSTOM_PROMPTS_SECTION, {}).get(
-                            CONF_PROMPT_EXPOSED_ENTITIES,
-                            DEFAULT_API_PROMPT_EXPOSED_ENTITIES,
-                        ),
-                    ): TextSelector(TextSelectorConfig(multiline=True)),
-                }
-            )
-        ),
-        # Langfuse Section
-        vol.Required(CONF_LANGFUSE_SECTION): section(
-            vol.Schema(
-                {
-                    vol.Required(
-                        CONF_ENABLE_LANGFUSE,
-                        default=options.get(CONF_LANGFUSE_SECTION, {}).get(
-                            CONF_ENABLE_LANGFUSE, False
-                        ),
-                    ): bool,
-                    vol.Optional(
-                        CONF_LANGFUSE_HOST,
-                        default=options.get(CONF_LANGFUSE_SECTION, {}).get(
-                            CONF_LANGFUSE_HOST, ""
-                        ),
-                    ): str,
-                    vol.Optional(
-                        CONF_LANGFUSE_PUBLIC_KEY,
-                        default=options.get(CONF_LANGFUSE_SECTION, {}).get(
-                            CONF_LANGFUSE_PUBLIC_KEY, ""
-                        ),
-                    ): str,
-                    vol.Optional(
-                        CONF_LANGFUSE_SECRET_KEY,
-                        default=options.get(CONF_LANGFUSE_SECTION, {}).get(
-                            CONF_LANGFUSE_SECRET_KEY, ""
-                        ),
-                    ): str,
-                    vol.Optional(
-                        CONF_LANGFUSE_BASE_PROMPT_ID,
-                        default=options.get(CONF_LANGFUSE_SECTION, {}).get(
-                            CONF_LANGFUSE_BASE_PROMPT_ID, ""
-                        ),
-                    ): str,
-                    vol.Optional(
-                        CONF_LANGFUSE_BASE_PROMPT_LABEL,
-                        default=options.get(CONF_LANGFUSE_SECTION, {}).get(
-                            CONF_LANGFUSE_BASE_PROMPT_LABEL, "production"
-                        ),
-                    ): str,
-                    vol.Optional(
-                        CONF_LANGFUSE_API_PROMPT_ID,
-                        default=options.get(CONF_LANGFUSE_SECTION, {}).get(
-                            CONF_LANGFUSE_API_PROMPT_ID, ""
-                        ),
-                    ): str,
-                    vol.Optional(
-                        CONF_LANGFUSE_API_PROMPT_LABEL,
-                        default=options.get(CONF_LANGFUSE_SECTION, {}).get(
-                            CONF_LANGFUSE_API_PROMPT_LABEL, "production"
-                        ),
-                    ): str,
-                    vol.Optional(
-                        CONF_LANGFUSE_TRACING_ENABLED,
-                        default=options.get(CONF_LANGFUSE_SECTION, {}).get(
-                            CONF_LANGFUSE_TRACING_ENABLED, False
-                        ),
-                    ): bool,
-                    vol.Optional(
-                        CONF_LANGFUSE_TAGS,
-                        default=options.get(CONF_LANGFUSE_SECTION, {}).get(
-                            CONF_LANGFUSE_TAGS, []
-                        ),
-                    ): SelectSelector(
-                        SelectSelectorConfig(
-                            options=[], multiple=True, custom_value=True
-                        )
-                    ),
-                    vol.Optional(
-                        CONF_LANGFUSE_SCORE_ENABLED,
-                        default=options.get(CONF_LANGFUSE_SECTION, {}).get(
-                            CONF_LANGFUSE_SCORE_ENABLED, False
-                        ),
-                    ): bool,
-                }
-            )
-        ),
-    }
-
-    return schema
-
-
-async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
-    """Validate the user input allows us to connect.
-
-    Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
-    """
-    # Todo: Implement validation logic after modifying config flow for multiple providers
-
-
 class CustomConversationConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Custom Conversation."""
 
-    VERSION = 1
+    VERSION = CONFIG_VERSION
+    _flow_data: dict[str, Any] = {}
 
-    async def _validate_entry(
-        self, user_input: dict[str, Any], step_id: str
-    ) -> ConfigFlowResult:
-        """Validate input and create entry if valid."""
-        errors: dict[str, str] = {}
+    async def _validate_credentials_and_get_models(
+        self, user_input: dict[str, Any]
+    ) -> list[str]:
+        """Validate credentials and fetch valid models."""
+        provider: LiteLLMProvider = self._flow_data[CONF_PRIMARY_PROVIDER]
+        api_key = user_input.get(CONF_PRIMARY_API_KEY)
+        base_url = user_input.get(CONF_PRIMARY_BASE_URL)
 
-        try:
-            await validate_input(self.hass, user_input)
-        except APIConnectionError:
-            errors["base"] = "cannot_connect"
-        except AuthenticationError:
-            errors["base"] = "invalid_auth"
-        except Exception:  # pylint: disable=broad-except
-            _LOGGER.exception("Unexpected exception")
-            errors["base"] = "unknown"
-        return errors
-
-    def _get_schema_with_defaults(self, step_id: str) -> vol.Schema:
-        """Get schema with defaults filled in."""
-        if step_id == "reconfigure":
-            config_entry = self._get_reconfigure_entry()
-            return vol.Schema(
-                {
-                    vol.Required(
-                        CONF_API_KEY, default=config_entry.data.get(CONF_API_KEY, "")
-                    ): str,
-                    vol.Required(
-                        CONF_BASE_URL,
-                        default=config_entry.data.get(
-                            CONF_BASE_URL, RECOMMENDED_BASE_URL
-                        ),
-                    ): str,
-                }
+        # The get_valid_models call appends /v1 to the base URL, so we need to remove it for this call
+        model_check_url = base_url
+        if model_check_url and model_check_url.endswith("/v1"):
+            model_check_url = model_check_url[:-3]
+        elif not model_check_url:
+            provider_info = ProviderConfigManager.get_provider_model_info(
+                model="", provider=provider.key
             )
-        return STEP_USER_DATA_SCHEMA
+            model_check_url = provider_info.get_api_base() if provider_info else None
+
+        return await self.hass.async_add_executor_job(
+            lambda: get_valid_models(
+                check_provider_endpoint=True,
+                custom_llm_provider=provider.key,
+                litellm_params=GenericLiteLLMParams(
+                    api_key=api_key,
+                    api_base=model_check_url,
+                ),
+            )
+        )
+
+    def _build_credentials_schema(
+        self, existing_data: dict[str, Any] | None = None
+    ) -> vol.Schema:
+        """Build the schema for the credentials step."""
+        if existing_data is None:
+            existing_data = {}
+        provider: LiteLLMProvider = self._flow_data[CONF_PRIMARY_PROVIDER]
+
+        schema_dict = {
+            vol.Required(
+                CONF_PRIMARY_API_KEY,
+                default=existing_data.get(CONF_PRIMARY_API_KEY),
+            ): TextSelector(TextSelectorConfig(type="password")),
+        }
+
+        default_base_url = existing_data.get(CONF_PRIMARY_BASE_URL)
+        if default_base_url is None or self._flow_data.get("changed_provider"):
+            # If the base URL is not set or the provider has changed, fetch the default base URL
+            if provider.supports_custom_base_url:
+                provider_info = ProviderConfigManager.get_provider_model_info(
+                    model="", provider=provider.key
+                )
+                default_base_url = (
+                    provider_info.get_api_base() if provider_info else None
+                )
+            else:  # If the provider does not support custom base URL, set it to None
+                default_base_url = None
+                self._flow_data.pop(CONF_PRIMARY_BASE_URL, None)
+
+        if provider.supports_custom_base_url:
+            # If the provider supports custom base URL, add it to the schema
+            schema_dict[
+                vol.Optional(
+                    CONF_PRIMARY_BASE_URL,
+                    default=default_base_url,
+                )
+            ] = str
+
+        return vol.Schema(schema_dict)
+
+    def _build_model_schema(
+        self, valid_models: list[str] | None, current_model: str | None = None
+    ) -> vol.Schema:
+        """Build the schema for the model selection step."""
+        schema_dict = {}
+        if valid_models:
+            schema_dict[
+                vol.Required(CONF_PRIMARY_CHAT_MODEL, default=current_model)
+            ] = SelectSelector(
+                SelectSelectorConfig(options=valid_models, custom_value=True, sort=True)
+            )
+        else:
+            schema_dict[
+                vol.Required(CONF_PRIMARY_CHAT_MODEL, default=current_model)
+            ] = str
+        return vol.Schema(schema_dict)
+
+    def _get_reconfigure_entry(self) -> ConfigEntry:
+        """Get the config entry to reconfigure."""
+        if not self.context or "entry_id" not in self.context:
+            _LOGGER.error(
+                "Config entry ID not found in context for reconfiguration. Context: %s",
+                self.context,
+            )
+            raise ValueError("Config entry ID not found in context for reconfiguration")
+        entry_id = self.context["entry_id"]
+        entry = self.hass.config_entries.async_get_entry(entry_id)
+        if not entry:
+            _LOGGER.error("Config entry %s not found during reconfiguration.", entry_id)
+            raise ValueError(f"Config entry {entry_id} not found")
+        return entry
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Handle the initial step."""
-        if user_input is None:
-            return self.async_show_form(
-                step_id="user", data_schema=self._get_schema_with_defaults("user")
+    ) -> FlowResult:
+        """Handle the provider selection step."""
+        if user_input is not None:
+            self._flow_data[CONF_PRIMARY_PROVIDER] = get_provider(
+                user_input[CONF_PRIMARY_PROVIDER]
+            )
+            return await self.async_step_credentials()
+
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_PRIMARY_PROVIDER, default=SUPPORTED_PROVIDERS[0].key
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            SelectOptionDict(label=p.provider_name, value=p.key)
+                            for p in SUPPORTED_PROVIDERS
+                        ]
+                    )
+                )
+            }
+        )
+        return self.async_show_form(step_id="user", data_schema=schema)
+
+    async def async_step_credentials(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle the credentials step."""
+        errors: dict[str, str] = {}
+        provider: LiteLLMProvider = self._flow_data[CONF_PRIMARY_PROVIDER]
+
+        if user_input is not None:
+            self._flow_data.update(user_input)
+            try:
+                valid_models = await self._validate_credentials_and_get_models(
+                    self._flow_data
+                )
+                return await self.async_step_model(valid_models=valid_models)
+            except AuthenticationError:
+                errors["base"] = "invalid_auth"
+            except APIConnectionError:
+                errors["base"] = "cannot_connect"
+
+        schema = self._build_credentials_schema()
+
+        return self.async_show_form(
+            step_id="credentials",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={"provider": provider.provider_name},
+        )
+
+    async def async_step_model(
+        self,
+        user_input: dict[str, Any] | None = None,
+        valid_models: list[str] | None = None,
+    ) -> FlowResult:
+        """Handle the model selection step."""
+        errors: dict[str, str] = {}
+        provider: LiteLLMProvider = self._flow_data[CONF_PRIMARY_PROVIDER]
+
+        if user_input is not None:
+            self._flow_data.update(user_input)
+
+            final_data = self._flow_data.copy()
+            final_data[CONF_PRIMARY_PROVIDER] = provider.key
+
+            return self.async_create_entry(
+                title="Custom Conversation",
+                data=final_data,
+                options=DEFAULT_OPTIONS,
             )
 
-        errors = await self._validate_entry(user_input, "user")
+        schema = self._build_model_schema(valid_models)
 
-        if errors:
-            return self.async_show_form(
-                step_id="user",
-                data_schema=self._get_schema_with_defaults("user"),
-                errors=errors,
-            )
-
-        return self.async_create_entry(
-            title="CustomConversation",
-            data=user_input,
-            options=RECOMMENDED_OPTIONS,
+        return self.async_show_form(
+            step_id="model",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={"provider": provider.provider_name},
         )
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    ) -> FlowResult:
         """Handle reconfiguration of the integration."""
-        if user_input is None:
-            return self.async_show_form(
-                step_id="reconfigure",
-                data_schema=self._get_schema_with_defaults("reconfigure"),
+        entry = self._get_reconfigure_entry()
+        initial_data = {**entry.data}
+        provider_key = initial_data.get(CONF_PRIMARY_PROVIDER)
+
+        initial_data[CONF_PRIMARY_PROVIDER] = get_provider(provider_key)
+
+        self._flow_data = initial_data
+        self.context["entry_id"] = entry.entry_id
+
+        return await self.async_step_reconfigure_provider()
+
+    async def async_step_reconfigure_provider(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle provider selection during reconfiguration."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            provider_key = user_input[CONF_PRIMARY_PROVIDER]
+            # If the provider_key is different from the current one, we've changed the provider and need to track it to change the default base_url
+            if provider_key != self._flow_data[CONF_PRIMARY_PROVIDER].key:
+                self._flow_data["changed_provider"] = True
+            self._flow_data[CONF_PRIMARY_PROVIDER] = get_provider(provider_key)
+            return await self.async_step_reconfigure_credentials()
+
+        current_provider: LiteLLMProvider = self._flow_data.get(CONF_PRIMARY_PROVIDER)
+
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_PRIMARY_PROVIDER, default=current_provider.key
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            SelectOptionDict(label=p.provider_name, value=p.key)
+                            for p in SUPPORTED_PROVIDERS
+                        ]
+                    )
+                )
+            }
+        )
+        return self.async_show_form(
+            step_id="reconfigure_provider", data_schema=schema, errors=errors
+        )
+
+    async def async_step_reconfigure_credentials(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle credentials during reconfiguration."""
+        errors: dict[str, str] = {}
+        provider: LiteLLMProvider = self._flow_data[CONF_PRIMARY_PROVIDER]
+
+        if user_input is not None:
+            self._flow_data.update(user_input)
+            try:
+                valid_models = await self._validate_credentials_and_get_models(
+                    self._flow_data
+                )
+                return await self.async_step_reconfigure_model(
+                    valid_models=valid_models
+                )
+            except AuthenticationError:
+                errors["base"] = "invalid_auth"
+            except APIConnectionError:
+                errors["base"] = "cannot_connect"
+
+        schema = self._build_credentials_schema(existing_data=self._flow_data)
+
+        return self.async_show_form(
+            step_id="reconfigure_credentials",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={"provider": provider.provider_name},
+        )
+
+    async def async_step_reconfigure_model(
+        self,
+        user_input: dict[str, Any] | None = None,
+        valid_models: list[str] | None = None,
+    ) -> FlowResult:
+        """Handle model selection during reconfiguration."""
+        errors: dict[str, str] = {}
+        provider: LiteLLMProvider = self._flow_data[CONF_PRIMARY_PROVIDER]
+
+        if user_input is not None:
+            self._flow_data.update(user_input)
+            entry = self._get_reconfigure_entry()
+
+            final_data = self._flow_data.copy()
+            final_data[CONF_PRIMARY_PROVIDER] = provider.key
+
+            return self.async_update_reload_and_abort(
+                entry, data=final_data, reason="reconfigure_successful"
             )
 
-        errors = await self._validate_entry(user_input, "reconfigure")
+        current_model = self._flow_data.get(CONF_PRIMARY_CHAT_MODEL)
+        schema = self._build_model_schema(valid_models, current_model)
 
-        if errors:
-            return self.async_show_form(
-                step_id="reconfigure",
-                data_schema=self._get_schema_with_defaults("reconfigure"),
-                errors=errors,
-            )
-
-        return self.async_update_reload_and_abort(
-            self._get_reconfigure_entry(), data_updates=user_input
+        return self.async_show_form(
+            step_id="reconfigure_model",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={"provider": provider.provider_name},
         )
 
     @staticmethod
@@ -494,39 +416,293 @@ class CustomConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         config_entry: ConfigEntry,
     ) -> OptionsFlow:
         """Create the options flow."""
-        return CustomConversationOptionsFlow()
+        return CustomConversationOptionsFlow(config_entry)
 
 
 class CustomConversationOptionsFlow(OptionsFlow):
     """Custom Conversation config flow options handler."""
 
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        """Initialize options flow."""
+
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    ) -> FlowResult:
         """Manage the options."""
-        options: dict[str, Any] | MappingProxyType[str, Any] = self.config_entry.options
-
         if user_input is not None:
-            if user_input[CONF_LLM_HASS_API] == "none":
-                user_input.pop(CONF_LLM_HASS_API)
-            # If the ignored intents are an empty list, use the defaults
-            if not user_input.get(CONF_IGNORED_INTENTS_SECTION, {}).get(
-                CONF_IGNORED_INTENTS
-            ):
-                user_input[CONF_IGNORED_INTENTS_SECTION][CONF_IGNORED_INTENTS] = (
-                    DEFAULT_IGNORED_INTENTS
+            # Process user input before saving
+            processed_input = {**user_input}  # Start with a copy
+
+            # Handle potential "none" value for Hass API control
+            if processed_input.get(CONF_LLM_HASS_API) == "none":
+                processed_input.pop(CONF_LLM_HASS_API, None)  # Remove if 'none'
+
+            # Handle empty ignored intents - use default
+            ignored_intents_section = processed_input.get(
+                CONF_IGNORED_INTENTS_SECTION, {}
+            )
+            if not ignored_intents_section.get(CONF_IGNORED_INTENTS):
+                ignored_intents_section[CONF_IGNORED_INTENTS] = (
+                    llm.AssistAPI.IGNORE_INTENTS
                 )
-            # If any of the custom prompts are an empty string, use the default for that prompt
-            for prompt in user_input.get(CONF_CUSTOM_PROMPTS_SECTION, {}):
-                if not user_input[CONF_CUSTOM_PROMPTS_SECTION][prompt]:
-                    user_input[CONF_CUSTOM_PROMPTS_SECTION][prompt] = (
-                        RECOMMENDED_OPTIONS[CONF_CUSTOM_PROMPTS_SECTION][prompt]
+                processed_input[CONF_IGNORED_INTENTS_SECTION] = ignored_intents_section
+
+            # If any of the custom prompts are an empty string, use the defaults
+            prompts = processed_input.get(CONF_CUSTOM_PROMPTS_SECTION, {})
+            for prompt in prompts:
+                if not prompts.get(prompt):
+                    prompts[prompt] = DEFAULT_OPTIONS[CONF_CUSTOM_PROMPTS_SECTION].get(
+                        prompt
                     )
+            processed_input[CONF_CUSTOM_PROMPTS_SECTION] = prompts
+            return self.async_create_entry(title="", data=processed_input)
 
-            return self.async_create_entry(title="", data=user_input)
+        # Build schema for options
+        options = self.config_entry.options
+        hass = self.hass
+        hass_apis = self._get_hass_apis(hass)
+        intents = await self._get_intents(hass)
+        default_ignored = llm.AssistAPI.IGNORE_INTENTS
 
-        schema = custom_conversation_config_option_schema(self.hass, options)
+        # Define the schema for options, using existing options as defaults
+        schema = vol.Schema(
+            {
+                # LLM Parameters (now direct options)
+                vol.Optional(
+                    CONF_TEMPERATURE,
+                    default=options.get(CONF_TEMPERATURE, DEFAULT_TEMPERATURE),
+                ): NumberSelector(NumberSelectorConfig(min=0, max=2, step=0.05)),
+                vol.Optional(
+                    CONF_TOP_P,
+                    default=options.get(CONF_TOP_P, DEFAULT_TOP_P),
+                ): NumberSelector(NumberSelectorConfig(min=0, max=1, step=0.05)),
+                vol.Optional(
+                    CONF_MAX_TOKENS,
+                    default=options.get(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1)),
+                # Hass API Control
+                vol.Optional(
+                    CONF_LLM_HASS_API,
+                    description={"suggested_value": options.get(CONF_LLM_HASS_API)},
+                    default="none",
+                ): SelectSelector(SelectSelectorConfig(options=hass_apis)),
+                # Agent Section
+                vol.Required(CONF_AGENTS_SECTION): section(
+                    vol.Schema(
+                        {
+                            vol.Required(
+                                CONF_ENABLE_HASS_AGENT,
+                                default=options.get(CONF_AGENTS_SECTION, {}).get(
+                                    CONF_ENABLE_HASS_AGENT, True
+                                ),
+                            ): bool,
+                            vol.Required(
+                                CONF_ENABLE_LLM_AGENT,
+                                default=options.get(CONF_AGENTS_SECTION, {}).get(
+                                    CONF_ENABLE_LLM_AGENT, True
+                                ),
+                            ): bool,
+                        }
+                    )
+                ),
+                # Ignored Intents Section
+                vol.Required(CONF_IGNORED_INTENTS_SECTION): section(
+                    vol.Schema(
+                        {
+                            vol.Required(
+                                CONF_IGNORED_INTENTS,
+                                default=options.get(
+                                    CONF_IGNORED_INTENTS_SECTION, {}
+                                ).get(CONF_IGNORED_INTENTS, default_ignored),
+                            ): SelectSelector(
+                                SelectSelectorConfig(
+                                    options=intents, multiple=True, sort=True
+                                )
+                            ),
+                        }
+                    )
+                ),
+                # Custom Prompts Section
+                vol.Required(CONF_CUSTOM_PROMPTS_SECTION): section(
+                    vol.Schema(
+                        {
+                            vol.Optional(
+                                CONF_INSTRUCTIONS_PROMPT,
+                                default=options.get(
+                                    CONF_CUSTOM_PROMPTS_SECTION, {}
+                                ).get(
+                                    CONF_INSTRUCTIONS_PROMPT,
+                                    DEFAULT_INSTRUCTIONS_PROMPT,
+                                ),
+                            ): TemplateSelector(),
+                            vol.Optional(
+                                CONF_PROMPT_BASE,
+                                default=options.get(
+                                    CONF_CUSTOM_PROMPTS_SECTION, {}
+                                ).get(CONF_PROMPT_BASE, DEFAULT_BASE_PROMPT),
+                            ): TemplateSelector(),
+                            vol.Optional(
+                                CONF_PROMPT_NO_ENABLED_ENTITIES,
+                                default=options.get(
+                                    CONF_CUSTOM_PROMPTS_SECTION, {}
+                                ).get(
+                                    CONF_PROMPT_NO_ENABLED_ENTITIES,
+                                    DEFAULT_PROMPT_NO_ENABLED_ENTITIES,
+                                ),
+                            ): TextSelector(TextSelectorConfig(multiline=True)),
+                            vol.Optional(
+                                CONF_API_PROMPT_BASE,
+                                default=options.get(
+                                    CONF_CUSTOM_PROMPTS_SECTION, {}
+                                ).get(CONF_API_PROMPT_BASE, DEFAULT_API_PROMPT_BASE),
+                            ): TextSelector(TextSelectorConfig(multiline=True)),
+                            vol.Optional(
+                                CONF_PROMPT_DEVICE_KNOWN_LOCATION,
+                                default=options.get(
+                                    CONF_CUSTOM_PROMPTS_SECTION, {}
+                                ).get(
+                                    CONF_PROMPT_DEVICE_KNOWN_LOCATION,
+                                    DEFAULT_API_PROMPT_DEVICE_KNOWN_LOCATION,
+                                ),
+                            ): TextSelector(TextSelectorConfig(multiline=True)),
+                            vol.Optional(
+                                CONF_PROMPT_DEVICE_UNKNOWN_LOCATION,
+                                default=options.get(
+                                    CONF_CUSTOM_PROMPTS_SECTION, {}
+                                ).get(
+                                    CONF_PROMPT_DEVICE_UNKNOWN_LOCATION,
+                                    DEFAULT_API_PROMPT_DEVICE_UNKNOWN_LOCATION,
+                                ),
+                            ): TextSelector(TextSelectorConfig(multiline=True)),
+                            vol.Optional(
+                                CONF_PROMPT_TIMERS_UNSUPPORTED,
+                                default=options.get(
+                                    CONF_CUSTOM_PROMPTS_SECTION, {}
+                                ).get(
+                                    CONF_PROMPT_TIMERS_UNSUPPORTED,
+                                    DEFAULT_API_PROMPT_TIMERS_UNSUPPORTED,
+                                ),
+                            ): TextSelector(TextSelectorConfig(multiline=True)),
+                            vol.Optional(
+                                CONF_PROMPT_EXPOSED_ENTITIES,
+                                default=options.get(
+                                    CONF_CUSTOM_PROMPTS_SECTION, {}
+                                ).get(
+                                    CONF_PROMPT_EXPOSED_ENTITIES,
+                                    DEFAULT_API_PROMPT_EXPOSED_ENTITIES,
+                                ),
+                            ): TextSelector(TextSelectorConfig(multiline=True)),
+                        }
+                    )
+                ),
+                # Langfuse Section
+                vol.Required(CONF_LANGFUSE_SECTION): section(
+                    vol.Schema(
+                        {
+                            vol.Required(
+                                CONF_ENABLE_LANGFUSE,
+                                default=options.get(CONF_LANGFUSE_SECTION, {}).get(
+                                    CONF_ENABLE_LANGFUSE, False
+                                ),
+                            ): bool,
+                            vol.Optional(
+                                CONF_LANGFUSE_HOST,
+                                default=options.get(CONF_LANGFUSE_SECTION, {}).get(
+                                    CONF_LANGFUSE_HOST, ""
+                                ),
+                            ): str,
+                            vol.Optional(
+                                CONF_LANGFUSE_PUBLIC_KEY,
+                                default=options.get(CONF_LANGFUSE_SECTION, {}).get(
+                                    CONF_LANGFUSE_PUBLIC_KEY, ""
+                                ),
+                            ): str,
+                            vol.Optional(
+                                CONF_LANGFUSE_SECRET_KEY,
+                                default=options.get(CONF_LANGFUSE_SECTION, {}).get(
+                                    CONF_LANGFUSE_SECRET_KEY, ""
+                                ),
+                            ): TextSelector(TextSelectorConfig(type="password")),
+                            vol.Optional(
+                                CONF_LANGFUSE_BASE_PROMPT_ID,
+                                default=options.get(CONF_LANGFUSE_SECTION, {}).get(
+                                    CONF_LANGFUSE_BASE_PROMPT_ID, ""
+                                ),
+                            ): str,
+                            vol.Optional(
+                                CONF_LANGFUSE_BASE_PROMPT_LABEL,
+                                default=options.get(CONF_LANGFUSE_SECTION, {}).get(
+                                    CONF_LANGFUSE_BASE_PROMPT_LABEL, "production"
+                                ),
+                            ): str,
+                            vol.Optional(
+                                CONF_LANGFUSE_API_PROMPT_ID,
+                                default=options.get(CONF_LANGFUSE_SECTION, {}).get(
+                                    CONF_LANGFUSE_API_PROMPT_ID, ""
+                                ),
+                            ): str,
+                            vol.Optional(
+                                CONF_LANGFUSE_API_PROMPT_LABEL,
+                                default=options.get(CONF_LANGFUSE_SECTION, {}).get(
+                                    CONF_LANGFUSE_API_PROMPT_LABEL, "production"
+                                ),
+                            ): str,
+                            vol.Optional(
+                                CONF_LANGFUSE_TRACING_ENABLED,
+                                default=options.get(CONF_LANGFUSE_SECTION, {}).get(
+                                    CONF_LANGFUSE_TRACING_ENABLED, False
+                                ),
+                            ): bool,
+                            vol.Optional(
+                                CONF_LANGFUSE_TAGS,
+                                default=options.get(CONF_LANGFUSE_SECTION, {}).get(
+                                    CONF_LANGFUSE_TAGS, []
+                                ),
+                            ): SelectSelector(
+                                SelectSelectorConfig(
+                                    options=[],
+                                    multiple=True,
+                                    custom_value=True,
+                                    sort=True,
+                                )
+                            ),
+                            vol.Optional(
+                                CONF_LANGFUSE_SCORE_ENABLED,
+                                default=options.get(CONF_LANGFUSE_SECTION, {}).get(
+                                    CONF_LANGFUSE_SCORE_ENABLED, False
+                                ),
+                            ): bool,
+                        }
+                    )
+                ),
+            }
+        )
+
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(schema),
+            data_schema=schema,
         )
+
+    def _get_hass_apis(self, hass: HomeAssistant) -> list[SelectOptionDict]:
+        """Get available Home Assistant LLM APIs."""
+        hass_apis: list[SelectOptionDict] = [
+            SelectOptionDict(label="No control", value="none")
+        ]
+        hass_apis.extend(
+            SelectOptionDict(label=api.name, value=api.id)
+            for api in llm.async_get_apis(hass)
+        )
+        return hass_apis
+
+    async def _get_intents(self, hass: HomeAssistant) -> list[SelectOptionDict]:
+        """Get available intents."""
+        hass_recommended_ignored = llm.AssistAPI.IGNORE_INTENTS
+        return [
+            {
+                "value": intent_obj.intent_type,
+                "label": f"{intent_obj.intent_type} (Hass Recommended)"
+                if intent_obj.intent_type in hass_recommended_ignored
+                else intent_obj.intent_type,
+            }
+            for intent_obj in intent.async_get(hass)
+        ]

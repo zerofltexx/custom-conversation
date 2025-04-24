@@ -1,100 +1,193 @@
 """Test the Custom Conversation config flow."""
 from unittest.mock import patch
 
+from litellm.exceptions import APIConnectionError, AuthenticationError
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.custom_conversation.config_flow import DEFAULT_OPTIONS
 from custom_components.custom_conversation.const import (
     CONF_AGENTS_SECTION,
-    CONF_CUSTOM_PROMPTS_SECTION,
-    CONF_PROMPT_BASE,
-    CONF_PROMPT_NO_ENABLED_ENTITIES,
     CONF_API_PROMPT_BASE,
-    CONF_PROMPT_DEVICE_KNOWN_LOCATION,
-    CONF_PROMPT_DEVICE_UNKNOWN_LOCATION,
-    CONF_PROMPT_TIMERS_UNSUPPORTED,
-    CONF_PROMPT_EXPOSED_ENTITIES,
-    CONF_IGNORED_INTENTS_SECTION,
-    CONF_IGNORED_INTENTS,
-    CONF_CHAT_MODEL,
+    CONF_CUSTOM_PROMPTS_SECTION,
     CONF_ENABLE_HASS_AGENT,
+    CONF_ENABLE_LANGFUSE,
     CONF_ENABLE_LLM_AGENT,
     CONF_IGNORED_INTENTS,
     CONF_IGNORED_INTENTS_SECTION,
-    CONF_ENABLE_LANGFUSE,
-    CONF_LANGFUSE_SECTION,
-    CONF_LANGFUSE_SECRET_KEY,
-    CONF_LANGFUSE_PUBLIC_KEY,
-    CONF_LANGFUSE_HOST,
-    CONF_LANGFUSE_BASE_PROMPT_ID,
-    CONF_LANGFUSE_API_PROMPT_ID,
-    CONF_LANGFUSE_TRACING_ENABLED,
-    CONF_LLM_PARAMETERS_SECTION,
-    CONF_MAX_TOKENS,
     CONF_INSTRUCTIONS_PROMPT,
+    CONF_LANGFUSE_API_PROMPT_ID,
+    CONF_LANGFUSE_BASE_PROMPT_ID,
+    CONF_LANGFUSE_HOST,
+    CONF_LANGFUSE_PUBLIC_KEY,
+    CONF_LANGFUSE_SECRET_KEY,
+    CONF_LANGFUSE_SECTION,
+    CONF_LANGFUSE_TRACING_ENABLED,
+    CONF_MAX_TOKENS,
+    CONF_PRIMARY_API_KEY,
+    CONF_PRIMARY_BASE_URL,
+    CONF_PRIMARY_CHAT_MODEL,
+    CONF_PRIMARY_PROVIDER,
+    CONF_PROMPT_BASE,
+    CONF_PROMPT_DEVICE_KNOWN_LOCATION,
+    CONF_PROMPT_DEVICE_UNKNOWN_LOCATION,
+    CONF_PROMPT_EXPOSED_ENTITIES,
+    CONF_PROMPT_NO_ENABLED_ENTITIES,
+    CONF_PROMPT_TIMERS_UNSUPPORTED,
     CONF_TEMPERATURE,
     CONF_TOP_P,
-    DEFAULT_BASE_PROMPT,
-    DEFAULT_PROMPT_NO_ENABLED_ENTITIES,
-    DEFAULT_INSTRUCTIONS_PROMPT,
     DEFAULT_API_PROMPT_BASE,
     DEFAULT_API_PROMPT_DEVICE_KNOWN_LOCATION,
     DEFAULT_API_PROMPT_DEVICE_UNKNOWN_LOCATION,
-    DEFAULT_API_PROMPT_TIMERS_UNSUPPORTED,
     DEFAULT_API_PROMPT_EXPOSED_ENTITIES,
+    DEFAULT_API_PROMPT_TIMERS_UNSUPPORTED,
+    DEFAULT_BASE_PROMPT,
+    DEFAULT_INSTRUCTIONS_PROMPT,
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_PROMPT_NO_ENABLED_ENTITIES,
+    DEFAULT_TEMPERATURE,
+    DEFAULT_TOP_P,
     DOMAIN,
-    LLM_API_ID,
-    RECOMMENDED_CHAT_MODEL,
-    RECOMMENDED_MAX_TOKENS,
-    RECOMMENDED_TEMPERATURE,
-    RECOMMENDED_TOP_P,
-    CONF_BASE_URL,
 )
-
-from homeassistant.const import CONF_LLM_HASS_API, CONF_API_KEY
+from homeassistant import config_entries
+from homeassistant.const import CONF_LLM_HASS_API
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import llm
-from homeassistant import config_entries
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
-
-async def test_show_config_form(hass: HomeAssistant):
-    """Test that the setup form is served."""
+async def test_config_flow_user_steps_openai(hass: HomeAssistant):
+    """Test the full user configuration flow for openai provider."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
-
     assert result["type"] == FlowResultType.FORM
-    assert result["errors"] is None
+    assert result["step_id"] == "user"
+    assert not result["errors"]
 
     with patch(
-        "custom_components.custom_conversation.async_setup", return_value=True
-    ) as mock_setup , patch(
+        "custom_components.custom_conversation.config_flow.CustomConversationConfigFlow._validate_credentials_and_get_models",
+        return_value=["gpt-4o-mini", "gpt-4-turbo"],
+    ), patch(
         "custom_components.custom_conversation.async_setup_entry",
         return_value=True,
-    ) as mock_setup_entry:
+    ):
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {"api_key": "test-api-key"}
+            result["flow_id"], {CONF_PRIMARY_PROVIDER: "openai"}
+        )
+        assert result["type"] == FlowResultType.FORM
+        assert result["step_id"] == "credentials"
+        assert not result["errors"]
+        assert CONF_PRIMARY_API_KEY in result["data_schema"].schema
+        assert CONF_PRIMARY_BASE_URL in result["data_schema"].schema
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_PRIMARY_API_KEY: "sk-testkey",
+                CONF_PRIMARY_BASE_URL: "https://api.openai.com/v1",
+            },
+        )
+        assert result["type"] == FlowResultType.FORM
+        assert result["step_id"] == "model"
+        assert not result["errors"]
+        assert CONF_PRIMARY_CHAT_MODEL in result["data_schema"].schema
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_PRIMARY_CHAT_MODEL: "gpt-4o-mini"}
         )
         await hass.async_block_till_done()
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert result["title"] == "CustomConversation"
-    assert result["data"]["api_key"] == "test-api-key"
+    assert result["title"] == "Custom Conversation" # Default title
+    assert result["data"] == {
+        CONF_PRIMARY_PROVIDER: "openai",
+        CONF_PRIMARY_API_KEY: "sk-testkey",
+        CONF_PRIMARY_BASE_URL: "https://api.openai.com/v1",
+        CONF_PRIMARY_CHAT_MODEL: "gpt-4o-mini",
+    }
+    assert result["options"] == DEFAULT_OPTIONS
 
-    # Recommended Options should be set by default at this point
-    assert result["options"][CONF_INSTRUCTIONS_PROMPT] == llm.DEFAULT_INSTRUCTIONS_PROMPT
-    assert result["options"][CONF_LLM_HASS_API] == LLM_API_ID
-    assert result["options"][CONF_AGENTS_SECTION][CONF_ENABLE_HASS_AGENT]
-    assert result["options"][CONF_AGENTS_SECTION][CONF_ENABLE_LLM_AGENT]
-    assert result["options"][CONF_LLM_PARAMETERS_SECTION][CONF_CHAT_MODEL] == RECOMMENDED_CHAT_MODEL
-    assert result["options"][CONF_LLM_PARAMETERS_SECTION][CONF_MAX_TOKENS] == RECOMMENDED_MAX_TOKENS
-    assert result["options"][CONF_LLM_PARAMETERS_SECTION][CONF_TOP_P] == RECOMMENDED_TOP_P
-    assert result["options"][CONF_LLM_PARAMETERS_SECTION][CONF_TEMPERATURE] == RECOMMENDED_TEMPERATURE
-    
 
-async def test_options_flow(hass: HomeAssistant, config_entry):
+async def test_config_flow_user_steps_gemini(hass: HomeAssistant):
+    """Test the full user configuration flow for gemini provider."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "user"
+
+    with patch(
+        "custom_components.custom_conversation.config_flow.CustomConversationConfigFlow._validate_credentials_and_get_models",
+        return_value=["gemini-pro", "gemini-1.5-pro-latest"],
+    ), patch(
+        "custom_components.custom_conversation.async_setup_entry",
+        return_value=True,
+    ):
+        # Step 2: Configure provider (gemini) -> credentials step
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_PRIMARY_PROVIDER: "gemini"}
+        )
+        assert result["type"] == FlowResultType.FORM
+        assert result["step_id"] == "credentials"
+        assert CONF_PRIMARY_API_KEY in result["data_schema"].schema
+        # See https://github.com/BerriAI/litellm/issues/7830
+        #assert CONF_PRIMARY_BASE_URL in result["data_schema"].schema
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_PRIMARY_API_KEY: "gemini-key"}
+        )
+        assert result["type"] == FlowResultType.FORM
+        assert result["step_id"] == "model"
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_PRIMARY_CHAT_MODEL: "gemini-1.5-pro-latest"}
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"].get(CONF_PRIMARY_PROVIDER) == "gemini"
+    assert result["data"].get(CONF_PRIMARY_API_KEY) == "gemini-key"
+    # See https://github.com/BerriAI/litellm/issues/7830
+    #assert result["data"].get(CONF_PRIMARY_BASE_URL) == "https://generativelanguage.googleapis.com",
+    assert result["data"].get(CONF_PRIMARY_CHAT_MODEL) == "gemini-1.5-pro-latest"
+    assert result["options"] == DEFAULT_OPTIONS
+
+
+async def test_config_flow_validation_errors(hass: HomeAssistant):
+    """Test credential validation errors during config flow."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_PRIMARY_PROVIDER: "openai"}
+    )
+
+    with patch(
+        "custom_components.custom_conversation.config_flow.CustomConversationConfigFlow._validate_credentials_and_get_models",
+        side_effect=AuthenticationError(message="Invalid API Key", llm_provider="openai", model="model"),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_PRIMARY_API_KEY: "bad-key"}
+        )
+        assert result["type"] == FlowResultType.FORM
+        assert result["step_id"] == "credentials"
+        assert result["errors"]["base"] == "invalid_auth"
+
+    with patch(
+        "custom_components.custom_conversation.config_flow.CustomConversationConfigFlow._validate_credentials_and_get_models",
+        side_effect=APIConnectionError(message="Cannot connect", llm_provider="openai", model="model"),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_PRIMARY_API_KEY: "good-key"} # Use same flow ID
+        )
+        assert result["type"] == FlowResultType.FORM
+        assert result["step_id"] == "credentials"
+        assert result["errors"]["base"] == "cannot_connect"
+
+
+async def test_options_flow(hass: HomeAssistant, config_entry: MockConfigEntry):
     """Test config flow options with sections."""
-    
+
     config_entry.add_to_hass(hass)
 
     with patch(
@@ -110,7 +203,6 @@ async def test_options_flow(hass: HomeAssistant, config_entry):
         result = await hass.config_entries.options.async_configure(
             result["flow_id"],
             user_input={
-                CONF_INSTRUCTIONS_PROMPT: "test-prompt",
                 CONF_LLM_HASS_API: "none",
                 CONF_IGNORED_INTENTS_SECTION: {
                     CONF_IGNORED_INTENTS: ["HassGetState"],
@@ -119,13 +211,11 @@ async def test_options_flow(hass: HomeAssistant, config_entry):
                     CONF_ENABLE_HASS_AGENT: True,
                     CONF_ENABLE_LLM_AGENT: False,
                 },
-                CONF_LLM_PARAMETERS_SECTION: {
-                    CONF_CHAT_MODEL: "test-chat-model",
-                    CONF_MAX_TOKENS: 50,
-                    CONF_TOP_P: 0.5,
-                    CONF_TEMPERATURE: 0.5,
-                },
+                CONF_TEMPERATURE: 0.5,
+                CONF_TOP_P: 0.5,
+                CONF_MAX_TOKENS: 50,
                 CONF_CUSTOM_PROMPTS_SECTION: {
+                    CONF_INSTRUCTIONS_PROMPT: "test-prompt",
                     CONF_PROMPT_BASE: "test-prompt-base",
                     CONF_PROMPT_NO_ENABLED_ENTITIES: "test-prompt-no-entities",
                     CONF_API_PROMPT_BASE: "test-api-prompt-base",
@@ -146,16 +236,17 @@ async def test_options_flow(hass: HomeAssistant, config_entry):
             },
         )
         assert result["type"] == FlowResultType.CREATE_ENTRY
-        assert result["data"][CONF_INSTRUCTIONS_PROMPT] == "test-prompt"
         assert CONF_LLM_HASS_API not in result["data"]
         assert "agents" in result["data"]
         assert result["data"][CONF_IGNORED_INTENTS_SECTION][CONF_IGNORED_INTENTS] == ["HassGetState"]
         assert result["data"][CONF_AGENTS_SECTION][CONF_ENABLE_HASS_AGENT] is True
         assert result["data"][CONF_AGENTS_SECTION][CONF_ENABLE_LLM_AGENT] is False
-        assert result["data"][CONF_LLM_PARAMETERS_SECTION][CONF_CHAT_MODEL] == "test-chat-model"
-        assert result["data"][CONF_LLM_PARAMETERS_SECTION][CONF_MAX_TOKENS] == 50
-        assert result["data"][CONF_LLM_PARAMETERS_SECTION][CONF_TOP_P] == 0.5
-        assert result["data"][CONF_LLM_PARAMETERS_SECTION][CONF_TEMPERATURE] == 0.5
+        # Assert LLM params are direct options
+        assert result["data"][CONF_TEMPERATURE] == 0.5
+        assert result["data"][CONF_TOP_P] == 0.5
+        assert result["data"][CONF_MAX_TOKENS] == 50
+        # Assert other sections
+        assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_INSTRUCTIONS_PROMPT] == "test-prompt"
         assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_BASE] == "test-prompt-base"
         assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_NO_ENABLED_ENTITIES] == "test-prompt-no-entities"
         assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_API_PROMPT_BASE] == "test-api-prompt-base"
@@ -172,7 +263,7 @@ async def test_options_flow(hass: HomeAssistant, config_entry):
 
 async def test_options_flow_empty_fields_reset(hass: HomeAssistant, config_entry):
     """Test config flow options with empty fields reset to recommended."""
-    
+
     config_entry.add_to_hass(hass)
 
     with patch(
@@ -196,12 +287,11 @@ async def test_options_flow_empty_fields_reset(hass: HomeAssistant, config_entry
                     CONF_ENABLE_HASS_AGENT: True,
                     CONF_ENABLE_LLM_AGENT: False,
                 },
-                CONF_LLM_PARAMETERS_SECTION: {
-                    CONF_MAX_TOKENS: 50,
-                    CONF_TOP_P: 0.5,
-                    CONF_TEMPERATURE: 0.5,
-                },
+                CONF_TEMPERATURE: 0.5,
+                CONF_TOP_P: 0.5,
+                CONF_MAX_TOKENS: 50,
                 CONF_CUSTOM_PROMPTS_SECTION: {
+                    CONF_INSTRUCTIONS_PROMPT: "",
                     CONF_PROMPT_BASE: "",
                     CONF_PROMPT_NO_ENABLED_ENTITIES: "",
                     CONF_API_PROMPT_BASE: "",
@@ -223,17 +313,18 @@ async def test_options_flow_empty_fields_reset(hass: HomeAssistant, config_entry
             },
         )
         assert result["type"] == FlowResultType.CREATE_ENTRY
-        assert result["data"][CONF_INSTRUCTIONS_PROMPT] == DEFAULT_INSTRUCTIONS_PROMPT.strip()
         assert CONF_LLM_HASS_API not in result["data"]
         assert "agents" in result["data"]
         assert result["data"][CONF_IGNORED_INTENTS_SECTION][CONF_IGNORED_INTENTS] == llm.AssistAPI.IGNORE_INTENTS
         assert result["data"][CONF_AGENTS_SECTION][CONF_ENABLE_HASS_AGENT] is True
         assert result["data"][CONF_AGENTS_SECTION][CONF_ENABLE_LLM_AGENT] is False
-        assert result["data"][CONF_LLM_PARAMETERS_SECTION][CONF_CHAT_MODEL] == RECOMMENDED_CHAT_MODEL
-        assert result["data"][CONF_LLM_PARAMETERS_SECTION][CONF_MAX_TOKENS] == 50
-        assert result["data"][CONF_LLM_PARAMETERS_SECTION][CONF_TOP_P] == 0.5
-        assert result["data"][CONF_LLM_PARAMETERS_SECTION][CONF_TEMPERATURE] == 0.5
-        assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_BASE].strip() == DEFAULT_BASE_PROMPT.strip()
+        # Assert LLM params are direct options
+        assert result["data"][CONF_TEMPERATURE] == 0.5
+        assert result["data"][CONF_TOP_P] == 0.5
+        assert result["data"][CONF_MAX_TOKENS] == 50
+        # Assert other sections
+        assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_INSTRUCTIONS_PROMPT].strip() == DEFAULT_INSTRUCTIONS_PROMPT.strip()
+        assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_BASE] == DEFAULT_BASE_PROMPT
         assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_NO_ENABLED_ENTITIES] == DEFAULT_PROMPT_NO_ENABLED_ENTITIES
         assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_API_PROMPT_BASE] == DEFAULT_API_PROMPT_BASE
         assert result["data"][CONF_CUSTOM_PROMPTS_SECTION][CONF_PROMPT_DEVICE_KNOWN_LOCATION] == DEFAULT_API_PROMPT_DEVICE_KNOWN_LOCATION
@@ -251,7 +342,7 @@ async def test_options_flow_empty_fields_reset(hass: HomeAssistant, config_entry
 
 async def test_options_flow_ignored_intents(hass: HomeAssistant, config_entry):
     """Test config flow options with ignored intents."""
-    
+
     config_entry.add_to_hass(hass)
     with patch(
         "custom_components.custom_conversation.async_setup", return_value=True
@@ -268,7 +359,7 @@ async def test_options_flow_ignored_intents(hass: HomeAssistant, config_entry):
         result = await hass.config_entries.options.async_init(config_entry.entry_id)
         assert result["type"] == FlowResultType.FORM
         assert result["step_id"] == "init"
-        
+
         test_intents = ["HassTurnOn", "HassTurnOff"]
         result = await hass.config_entries.options.async_configure(
             result["flow_id"],
@@ -280,12 +371,9 @@ async def test_options_flow_ignored_intents(hass: HomeAssistant, config_entry):
                     CONF_ENABLE_HASS_AGENT: True,
                     CONF_ENABLE_LLM_AGENT: True,
                 },
-                CONF_LLM_PARAMETERS_SECTION: {
-                    CONF_CHAT_MODEL: RECOMMENDED_CHAT_MODEL,
-                    CONF_MAX_TOKENS: RECOMMENDED_MAX_TOKENS,
-                    CONF_TOP_P: RECOMMENDED_TOP_P,
-                    CONF_TEMPERATURE: RECOMMENDED_TEMPERATURE,
-                },
+                CONF_TEMPERATURE: DEFAULT_TEMPERATURE,
+                CONF_TOP_P: DEFAULT_TOP_P,
+                CONF_MAX_TOKENS: DEFAULT_MAX_TOKENS,
                 CONF_CUSTOM_PROMPTS_SECTION: {},
                 CONF_LANGFUSE_SECTION: {}
             },
@@ -294,32 +382,42 @@ async def test_options_flow_ignored_intents(hass: HomeAssistant, config_entry):
         assert result["data"][CONF_IGNORED_INTENTS_SECTION][CONF_IGNORED_INTENTS] == test_intents
 
 
-async def test_step_reconfigure_prefills_data(hass: HomeAssistant, config_entry):
-    """Test reconfigure step prefills with existing config data."""
 
-    result = await config_entry.start_reconfigure_flow(hass)
-
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "reconfigure"
-    # Check that the defaults are set from existing config
-    assert result["data_schema"].schema
-    api_key = next(key.default() for key in result["data_schema"].schema if key == CONF_API_KEY)
-    assert api_key == "test-api-key"
-    url = next(key.default() for key in result["data_schema"].schema if key == CONF_BASE_URL)
-    assert url == "https://api.openai.com/v1"
+async def test_reconfigure_flow_steps(hass: HomeAssistant, config_entry: MockConfigEntry):
+    """Test the full multi-step reconfigure flow."""
+    config_entry.add_to_hass(hass)
 
     with patch(
-        "custom_components.custom_conversation.async_setup", return_value=True
-    ), patch(
-        "custom_components.custom_conversation.async_setup_entry",
-        return_value=True,
+        "custom_components.custom_conversation.config_flow.CustomConversationConfigFlow._validate_credentials_and_get_models",
+        return_value=["new-model-1", "new-model-2"],
     ):
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            {
-                CONF_API_KEY: "new-api-key",
-                CONF_BASE_URL: "https://new-url.com",
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={
+                "source": config_entries.SOURCE_RECONFIGURE,
+                "entry_id": config_entry.entry_id,
             },
+        )
+        assert result["type"] == FlowResultType.FORM
+        assert result["step_id"] == "reconfigure_provider"
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_PRIMARY_PROVIDER: "gemini"}
+        )
+        await hass.async_block_till_done()
+        assert result["type"] == FlowResultType.FORM
+        assert result["step_id"] == "reconfigure_credentials"
+        assert result["description_placeholders"]["provider"] == "Gemini - Google AI Studio"
+
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_PRIMARY_API_KEY: "new-gemini-key"}
+        )
+        assert result["type"] == FlowResultType.FORM
+        assert result["step_id"] == "reconfigure_model"
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_PRIMARY_CHAT_MODEL: "new-model-1"}
         )
         await hass.async_block_till_done()
 

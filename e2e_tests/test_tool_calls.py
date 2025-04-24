@@ -19,18 +19,15 @@ async def test_tool_call_switch( # Add mock_test_switch fixture dependency
 ):
     """Test a conversation flow that should result in a switch.turn_on tool call."""
     config_entry = setup_config_entry
-    # Get provider ID for assertion messages
     provider_id = config_entry.entry_id.replace("_e2e_test_entry", "")
 
-    # --- Setup Service Mock ---
-    # Mock the switch.turn_on service call to verify it's called correctly
     turn_on_calls = async_mock_service(hass, switch.DOMAIN, SERVICE_TURN_ON)
 
-    # --- Test Conversation ---
     test_prompt = "Turn on the test switch"
     conversation_id = f"test-{provider_id}-tool-convo-1"
+    if len(conversation_id) == 26:
+        conversation_id = f"test-{provider_id}-tool-convo-01"
 
- # --- Event Listeners ---
     started_events = []
     ended_events = []
 
@@ -44,27 +41,20 @@ async def test_tool_call_switch( # Add mock_test_switch fixture dependency
         context=Context(),
         agent_id=config_entry.entry_id,
     )
-    await hass.async_block_till_done() # Ensure service calls are processed
+    await hass.async_block_till_done()
 
-
-    # --- Assertions ---
     assert result is not None, f"[{provider_id}] Tool call result was None"
     assert result.response is not None, f"[{provider_id}] Tool call response was None"
     assert result.response.error_code is None, f"[{provider_id}] Tool call failed: {result.response.error_code}"
 
-    # Assert service call
     assert len(turn_on_calls) == 1, f"[{provider_id}] Expected 1 switch.turn_on call, got {len(turn_on_calls)}"
-    # Ensure the entity ID is compared correctly (it should be a string, not a list)
     assert turn_on_calls[0].data[ATTR_ENTITY_ID] == ["switch.test_switch"], f"[{provider_id}] Service called with wrong entity_id"
 
-    # Basic check on response text (might vary significantly based on LLM)
     response_text = result.response.speech.get("plain", {}).get("speech", "")
     assert response_text is not None, f"[{provider_id}] Tool call response text was None"
-    # Example: Check if it mentions turning something on or the switch name
     assert "test switch" in response_text.lower() or "turned on" in response_text.lower(), \
         f"[{provider_id}] Response text doesn't seem to confirm action: {response_text}"
 
-    # --- Assert Events ---
     assert len(started_events) == 1, f"[{provider_id}] Expected 1 conversation_started event, got {len(started_events)}"
     assert started_events[0].data["agent_id"] == config_entry.entry_id
     assert started_events[0].data["conversation_id"] == conversation_id

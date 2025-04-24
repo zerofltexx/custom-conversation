@@ -11,8 +11,6 @@ from pytest_socket import enable_socket, socket_allow_hosts
 
 from custom_components.custom_conversation.const import (
     CONF_AGENTS_SECTION,
-    CONF_BASE_URL,
-    CONF_CHAT_MODEL,
     CONF_ENABLE_HASS_AGENT,
     CONF_ENABLE_LANGFUSE,
     CONF_ENABLE_LLM_AGENT,
@@ -23,14 +21,19 @@ from custom_components.custom_conversation.const import (
     CONF_LANGFUSE_SECRET_KEY,
     CONF_LANGFUSE_SECTION,
     CONF_LANGFUSE_TRACING_ENABLED,
-    CONF_LLM_PARAMETERS_SECTION,
+    CONF_PRIMARY_API_KEY,
+    CONF_PRIMARY_BASE_URL,
+    CONF_PRIMARY_CHAT_MODEL,
+    CONF_PRIMARY_PROVIDER,
     DOMAIN,
     LLM_API_ID,
-    RECOMMENDED_BASE_URL,
-    RECOMMENDED_CHAT_MODEL,
+)
+from custom_components.custom_conversation.providers import (
+    LiteLLMProvider,
+    get_provider,
 )
 from homeassistant.components import switch
-from homeassistant.const import CONF_API_KEY, CONF_LLM_HASS_API
+from homeassistant.const import CONF_LLM_HASS_API
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
 
@@ -54,8 +57,6 @@ def pytest_runtest_setup():
     socket_allow_hosts([*ALLOWED_HOSTS, "localhost"], allow_unix_socket=True)
 
 
-# --- LLM Provider Configuration ---
-
 @dataclasses.dataclass
 class LLMProviderConfig:
     """Configuration for an LLM provider."""
@@ -64,8 +65,13 @@ class LLMProviderConfig:
     model_env_var: str
     api_key_env_var: str
     base_url_env_var: str | None = None
-    default_model: str = RECOMMENDED_CHAT_MODEL
+    default_model: str | None = None
     default_base_url: str | None = None
+    primary_provider: str | None = None
+
+    def get_primary_provider(self) -> LiteLLMProvider:
+        """Get the primary provider for this configuration."""
+        return get_provider(self.primary_provider)
 
     def get_api_key(self) -> str:
         """Get API key, skipping test if not found."""
@@ -88,40 +94,48 @@ class LLMProviderConfig:
     def get_mock_config_entry_data(self) -> dict:
         """Generate the data dict for MockConfigEntry (API Key, Base URL)."""
         data = {
-            CONF_API_KEY: self.get_api_key()
+            CONF_PRIMARY_API_KEY: self.get_api_key(),
+            CONF_PRIMARY_CHAT_MODEL: self.get_model(),
+            CONF_PRIMARY_PROVIDER: self.get_primary_provider(),
         }
         base_url = self.get_base_url()
         if base_url:
-            data[CONF_BASE_URL] = base_url
+            data[CONF_PRIMARY_BASE_URL] = base_url
         return data
 
     def get_mock_config_entry_options(self) -> dict:
         """Generate the options dict for MockConfigEntry (Model, etc.)."""
-        return {
-            CONF_LLM_PARAMETERS_SECTION:{
-                CONF_CHAT_MODEL: self.get_model(),
-            }
-        }
+        return {}
 
 
-# Define the providers to test
 SUPPORTED_PROVIDERS = [
     LLMProviderConfig(
         id="openai",
         api_key_env_var="OPENAI_API_KEY",
         model_env_var="OPENAI_MODEL",
         base_url_env_var="OPENAI_BASE_URL",
-        default_base_url=RECOMMENDED_BASE_URL,
-        default_model=RECOMMENDED_CHAT_MODEL,
+        default_base_url="https://api.openai.com/v1",
+        default_model="openai/gpt-4o",
+        primary_provider="openai"
     ),
     LLMProviderConfig(
         id="google_gemini_openai_compat",
         api_key_env_var="GEMINI_API_KEY",
-        model_env_var="GEMINI_MODEL",
+        model_env_var="GEMINI_OPENAI_MODEL",
         base_url_env_var="GEMINI_OPENAI_BASE_URL",
         default_base_url=None,
-        default_model="gemini-1.5-flash-latest",
+        default_model="openai/gemini-1.5-flash-latest",
+        primary_provider="openai"
     ),
+    LLMProviderConfig(
+        id="google_gemini",
+        api_key_env_var="GEMINI_API_KEY",
+        model_env_var="GEMINI_MODEL",
+        base_url_env_var="GEMINI_BASE_URL",
+        default_base_url=None,
+        default_model="gemini/gemini-1.5-flash-latest",
+        primary_provider="gemini"
+    )
 ]
 
 @pytest.fixture(params=SUPPORTED_PROVIDERS, ids=[p.id for p in SUPPORTED_PROVIDERS])
@@ -136,13 +150,11 @@ def llm_config(request) -> LLMProviderConfig:
     return config
 
 
-# Auto-enable custom integrations fixture (ensure it's defined correctly)
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations):
     """Enable custom integrations for E2E testing."""
     return
 
-# --- Langfuse Configuration Fixture ---
 @dataclasses.dataclass
 class LangfuseTestConfig:
     """Dataclass for Langfuse test configuration."""
@@ -162,7 +174,6 @@ def langfuse_config() -> LangfuseTestConfig:
     base_prompt_id = os.getenv("LANGFUSE_BASE_PROMPT_ID")
     api_prompt_id = os.getenv("LANGFUSE_API_PROMPT_ID")
 
-    # Also check if the host env var was set
     langfuse_host = os.getenv("LANGFUSE_HOST")
     if not all([public_key, secret_key, base_prompt_id, api_prompt_id, langfuse_host]):
         pytest.skip("Required Langfuse environment variables (PUBLIC_KEY, SECRET_KEY, HOST, BASE_PROMPT_ID, API_PROMPT_ID) not set. Skipping Langfuse tests.")
@@ -170,7 +181,7 @@ def langfuse_config() -> LangfuseTestConfig:
     return LangfuseTestConfig(
         public_key=public_key,
         secret_key=secret_key,
-        host=langfuse_host, # Use the host directly from env var
+        host=langfuse_host,
         base_prompt_id=base_prompt_id,
         api_prompt_id=api_prompt_id,
     )
@@ -185,8 +196,6 @@ async def setup_config_entry(hass: HomeAssistant, llm_config: LLMProviderConfig)
     config_data = llm_config.get_mock_config_entry_data()
     config_options = llm_config.get_mock_config_entry_options()
 
-    # Base options for most E2E tests (can be overridden)
-    # Defaulting Langfuse to disabled unless requested by a specific test fixture
     common_test_options = {
         CONF_LLM_HASS_API: LLM_API_ID,
         CONF_AGENTS_SECTION: {
@@ -209,12 +218,9 @@ async def setup_config_entry(hass: HomeAssistant, llm_config: LLMProviderConfig)
     )
     entry.add_to_hass(hass)
 
-    # Setup core components needed
     assert await async_setup_component(hass, "homeassistant", {})
     assert await async_setup_component(hass, "conversation", {})
-    # Ensure switch domain is loaded for tests that might need it
     assert await async_setup_component(hass, switch.DOMAIN, {})
-    # Setup the custom component
     assert await async_setup_component(hass, DOMAIN, {})
     await hass.async_block_till_done()
 
