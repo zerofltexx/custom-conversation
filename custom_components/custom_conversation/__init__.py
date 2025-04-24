@@ -16,10 +16,13 @@ from .const import (
     CONF_LANGFUSE_SCORE_ENABLED,
     CONF_LANGFUSE_SECTION,
     CONF_LLM_PARAMETERS_SECTION,
+    CONF_MAX_TOKENS,
     CONF_PRIMARY_API_KEY,
     CONF_PRIMARY_BASE_URL,
     CONF_PRIMARY_CHAT_MODEL,
     CONF_PRIMARY_PROVIDER,
+    CONF_TEMPERATURE,
+    CONF_TOP_P,
     CONFIG_VERSION,
     DEFAULT_PROVIDER,
     DOMAIN,
@@ -120,33 +123,19 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         new_data = {**config_entry.data}
         new_options = {**config_entry.options}
 
-        # Migrate data fields
         new_data[CONF_PRIMARY_PROVIDER] = DEFAULT_PROVIDER
-        if CONF_API_KEY in new_data:
-            new_data[CONF_PRIMARY_API_KEY] = new_data.pop(CONF_API_KEY)
-        else:
-            # Ensure key exists even if migrating from very old state without it
-            new_data.setdefault(CONF_PRIMARY_API_KEY, "")
+        new_data[CONF_PRIMARY_API_KEY] = new_data.pop(CONF_API_KEY)
 
-        if CONF_BASE_URL in new_data:
-            new_data[CONF_PRIMARY_BASE_URL] = new_data.pop(CONF_BASE_URL)
-        else:
-            new_data.setdefault(CONF_PRIMARY_BASE_URL, "")
+        new_data[CONF_PRIMARY_BASE_URL] = new_data.pop(CONF_BASE_URL)
 
         # Migrate model from options to data
         llm_params = new_options.get(CONF_LLM_PARAMETERS_SECTION, {})
-        if CONF_CHAT_MODEL in llm_params:
-            new_data[CONF_PRIMARY_CHAT_MODEL] = llm_params[CONF_CHAT_MODEL]
-        else:
-            # Ensure model exists even if migrating from state without it
-            new_data.setdefault(
-                CONF_PRIMARY_CHAT_MODEL, ""
-            )  # Default model name handled in config flow
+        new_data[CONF_PRIMARY_CHAT_MODEL] = llm_params[CONF_CHAT_MODEL]
 
-        # Remove old options section
-        if CONF_LLM_PARAMETERS_SECTION in new_options:
-            new_options.pop(CONF_LLM_PARAMETERS_SECTION)
-
+        # Other LLM parameters have moved up to top level options
+        new_options[CONF_TEMPERATURE] = llm_params.get(CONF_TEMPERATURE)
+        new_options[CONF_TOP_P] = llm_params.get(CONF_TOP_P)
+        new_options[CONF_MAX_TOKENS] = llm_params.get(CONF_MAX_TOKENS)
         hass.config_entries.async_update_entry(
             config_entry,
             data=new_data,
