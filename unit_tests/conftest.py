@@ -20,6 +20,7 @@ from custom_components.custom_conversation.const import (
     CONF_PROMPT_DEVICE_KNOWN_LOCATION,
     CONF_PROMPT_NO_ENABLED_ENTITIES,
     DOMAIN,
+    CONFIG_VERSION,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
@@ -47,6 +48,7 @@ def config_entry(hass: HomeAssistant) -> MockConfigEntry:
     """Create a mock config entry."""
     entry = MockConfigEntry(
         title="Test",
+        version=CONFIG_VERSION,
         domain=DOMAIN,
         data={ # Use new data structure
             CONF_PRIMARY_PROVIDER: "openai",
