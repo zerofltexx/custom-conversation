@@ -130,7 +130,7 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
 
         # Migrate model from options to data
         llm_params = new_options.get(CONF_LLM_PARAMETERS_SECTION, {})
-        new_data[CONF_PRIMARY_CHAT_MODEL] = llm_params[CONF_CHAT_MODEL]
+        new_data[CONF_PRIMARY_CHAT_MODEL] = llm_params.get(CONF_CHAT_MODEL, None)
 
         # Other LLM parameters have moved up to top level options
         new_options[CONF_TEMPERATURE] = llm_params.get(CONF_TEMPERATURE)
