@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from litellm.exceptions import APIConnectionError, AuthenticationError, BadRequestError
+from litellm.exceptions import APIConnectionError, AuthenticationError
 from litellm.types.router import GenericLiteLLMParams
 from litellm.utils import ProviderConfigManager
 import voluptuous as vol
@@ -69,37 +69,25 @@ from .const import (
     DEFAULT_INSTRUCTIONS_PROMPT,
     DEFAULT_MAX_TOKENS,
     DEFAULT_PROMPT_NO_ENABLED_ENTITIES,
-    DEFAULT_PROVIDER,
     DEFAULT_TEMPERATURE,
     DEFAULT_TOP_P,
     DOMAIN,
-    HASS_DEPRECATED_INTENTS,
-    LLM_API_ID,
     LOGGER,
-    # RECOMMENDED_BASE_URL, # Removed
-    # RECOMMENDED_CHAT_MODEL, # Removed
-    # RECOMMENDED_MAX_TOKENS, # Removed
-    # RECOMMENDED_TEMPERATURE, # Removed
-    # RECOMMENDED_TOP_P, # Removed
 )
 from .litellm_utils import get_valid_models
-from .providers import SUPPORTED_PROVIDERS, get_provider
+from .providers import SUPPORTED_PROVIDERS, LiteLLMProvider, get_provider
 
-_LOGGER = LOGGER  # Use logger from const.py
+_LOGGER = LOGGER
 
-# Default values for the OPTIONAL parameters stored in config_entry.options
 DEFAULT_OPTIONS = {
-    CONF_LLM_HASS_API: "none",  # Default to no Hass API control
-    CONF_INSTRUCTIONS_PROMPT: DEFAULT_INSTRUCTIONS_PROMPT,
+    CONF_LLM_HASS_API: "none",
     CONF_AGENTS_SECTION: {
         CONF_ENABLE_HASS_AGENT: True,
         CONF_ENABLE_LLM_AGENT: True,
     },
-    # LLM Params moved to options flow schema defaults
-    # CONF_IGNORED_INTENTS: llm.AssistAPI.IGNORE_INTENTS, # Default handled in schema
     CONF_CUSTOM_PROMPTS_SECTION: {
         CONF_PROMPT_BASE: DEFAULT_BASE_PROMPT,
-        # CONF_INSTRUCTIONS_PROMPT: DEFAULT_INSTRUCTIONS_PROMPT, # Handled directly
+        CONF_INSTRUCTIONS_PROMPT: DEFAULT_INSTRUCTIONS_PROMPT,
         CONF_PROMPT_NO_ENABLED_ENTITIES: DEFAULT_PROMPT_NO_ENABLED_ENTITIES,
         CONF_API_PROMPT_BASE: DEFAULT_API_PROMPT_BASE,
         CONF_PROMPT_DEVICE_KNOWN_LOCATION: DEFAULT_API_PROMPT_DEVICE_KNOWN_LOCATION,
@@ -120,11 +108,6 @@ DEFAULT_OPTIONS = {
         CONF_LANGFUSE_TAGS: [],
         CONF_LANGFUSE_SCORE_ENABLED: False,
     },
-    # Add defaults for LLM parameters directly here if needed,
-    # but better handled in the options schema itself.
-    # CONF_MAX_TOKENS: DEFAULT_MAX_TOKENS, # Handled in schema
-    # CONF_TOP_P: DEFAULT_TOP_P, # Handled in schema
-    # CONF_TEMPERATURE: DEFAULT_TEMPERATURE, # Handled in schema
 }
 
 
@@ -132,15 +115,117 @@ class CustomConversationConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Custom Conversation."""
 
     VERSION = CONFIG_VERSION
-    _flow_data: dict[str, Any] = {}  # Store data between steps
+    _flow_data: dict[str, Any] = {}
+
+    async def _validate_credentials_and_get_models(
+        self, user_input: dict[str, Any]
+    ) -> list[str]:
+        """Validate credentials and fetch valid models."""
+        provider: LiteLLMProvider = self._flow_data[CONF_PRIMARY_PROVIDER]
+        api_key = user_input.get(CONF_PRIMARY_API_KEY)
+        base_url = user_input.get(CONF_PRIMARY_BASE_URL)
+
+        # The get_valid_models call appends /v1 to the base URL, so we need to remove it for this call
+        model_check_url = base_url
+        if model_check_url and model_check_url.endswith("/v1"):
+            model_check_url = model_check_url[:-3]
+        elif not model_check_url:
+            provider_info = ProviderConfigManager.get_provider_model_info(
+                model="", provider=provider.key
+            )
+            model_check_url = provider_info.get_api_base() if provider_info else None
+
+        return await self.hass.async_add_executor_job(
+            lambda: get_valid_models(
+                check_provider_endpoint=True,
+                custom_llm_provider=provider.key,
+                litellm_params=GenericLiteLLMParams(
+                    api_key=api_key,
+                    api_base=model_check_url,
+                ),
+            )
+        )
+
+    def _build_credentials_schema(
+        self, existing_data: dict[str, Any] | None = None
+    ) -> vol.Schema:
+        """Build the schema for the credentials step."""
+        if existing_data is None:
+            existing_data = {}
+        provider: LiteLLMProvider = self._flow_data[CONF_PRIMARY_PROVIDER]
+
+        schema_dict = {
+            vol.Required(
+                CONF_PRIMARY_API_KEY,
+                default=existing_data.get(CONF_PRIMARY_API_KEY),
+            ): TextSelector(TextSelectorConfig(type="password")),
+        }
+
+        default_base_url = existing_data.get(CONF_PRIMARY_BASE_URL)
+        if default_base_url is None or self._flow_data.get("changed_provider"):
+            # If the base URL is not set or the provider has changed, fetch the default base URL
+            if provider.supports_custom_base_url:
+                provider_info = ProviderConfigManager.get_provider_model_info(
+                    model="", provider=provider.key
+                )
+                default_base_url = (
+                    provider_info.get_api_base() if provider_info else None
+                )
+            else:  # If the provider does not support custom base URL, set it to None
+                default_base_url = None
+                self._flow_data.pop(CONF_PRIMARY_BASE_URL, None)
+
+        if provider.supports_custom_base_url:
+            # If the provider supports custom base URL, add it to the schema
+            schema_dict[
+                vol.Optional(
+                    CONF_PRIMARY_BASE_URL,
+                    default=default_base_url,
+                )
+            ] = str
+
+        return vol.Schema(schema_dict)
+
+    def _build_model_schema(
+        self, valid_models: list[str] | None, current_model: str | None = None
+    ) -> vol.Schema:
+        """Build the schema for the model selection step."""
+        schema_dict = {}
+        if valid_models:
+            schema_dict[
+                vol.Required(CONF_PRIMARY_CHAT_MODEL, default=current_model)
+            ] = SelectSelector(
+                SelectSelectorConfig(options=valid_models, custom_value=True, sort=True)
+            )
+        else:
+            schema_dict[
+                vol.Required(CONF_PRIMARY_CHAT_MODEL, default=current_model)
+            ] = str
+        return vol.Schema(schema_dict)
+
+    def _get_reconfigure_entry(self) -> ConfigEntry:
+        """Get the config entry to reconfigure."""
+        if not self.context or "entry_id" not in self.context:
+            _LOGGER.error(
+                "Config entry ID not found in context for reconfiguration. Context: %s",
+                self.context,
+            )
+            raise ValueError("Config entry ID not found in context for reconfiguration")
+        entry_id = self.context["entry_id"]
+        entry = self.hass.config_entries.async_get_entry(entry_id)
+        if not entry:
+            _LOGGER.error("Config entry %s not found during reconfiguration.", entry_id)
+            raise ValueError(f"Config entry {entry_id} not found")
+        return entry
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle the provider selection step."""
         if user_input is not None:
-            primary_provider = get_provider(user_input.get(CONF_PRIMARY_PROVIDER))
-            self._flow_data.update({CONF_PRIMARY_PROVIDER: primary_provider})
+            self._flow_data[CONF_PRIMARY_PROVIDER] = get_provider(
+                user_input[CONF_PRIMARY_PROVIDER]
+            )
             return await self.async_step_credentials()
 
         schema = vol.Schema(
@@ -150,10 +235,8 @@ class CustomConversationConfigFlow(ConfigFlow, domain=DOMAIN):
                 ): SelectSelector(
                     SelectSelectorConfig(
                         options=[
-                            SelectOptionDict(
-                                label=provider.provider_name, value=provider.key
-                            )
-                            for provider in SUPPORTED_PROVIDERS
+                            SelectOptionDict(label=p.provider_name, value=p.key)
+                            for p in SUPPORTED_PROVIDERS
                         ]
                     )
                 )
@@ -166,56 +249,27 @@ class CustomConversationConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle the credentials step."""
         errors: dict[str, str] = {}
-        provider = self._flow_data[CONF_PRIMARY_PROVIDER]
+        provider: LiteLLMProvider = self._flow_data[CONF_PRIMARY_PROVIDER]
 
         if user_input is not None:
             self._flow_data.update(user_input)
             try:
-                # The get_valid_models call appends /v1 to the base URL, so we need to remove it for this call
-                model_check_url = user_input.get(CONF_PRIMARY_BASE_URL, None)
-                if model_check_url and model_check_url.endswith("/v1"):
-                    model_check_url = model_check_url[:-3]
-
-                # Get the valid models, which will also validate credentials
-                valid_models = await self.hass.async_add_executor_job(
-                    lambda: get_valid_models(
-                        check_provider_endpoint=True,
-                        custom_llm_provider=provider.key,
-                        litellm_params=GenericLiteLLMParams(
-                            api_key=user_input[CONF_PRIMARY_API_KEY],
-                            api_base=model_check_url,
-                        ),
-                    )
+                valid_models = await self._validate_credentials_and_get_models(
+                    self._flow_data
                 )
                 return await self.async_step_model(valid_models=valid_models)
             except AuthenticationError:
                 errors["base"] = "invalid_auth"
             except APIConnectionError:
                 errors["base"] = "cannot_connect"
-            except Exception as err:  # Catch-all for unexpected validation errors
-                _LOGGER.error(f"Unexpected error: {err}")
-                errors["base"] = "unknown"
 
-        schema_dict = {
-            vol.Required(CONF_PRIMARY_API_KEY): TextSelector(
-                TextSelectorConfig(type="password")
-            ),
-        }
-        # Currently all of our providers have a default base URL that can also be changed
-        default_base_url = ProviderConfigManager.get_provider_model_info(
-            model="", provider=provider.key
-        ).get_api_base()
-        schema_dict[vol.Optional(CONF_PRIMARY_BASE_URL, default=default_base_url)] = str
-
-        schema = vol.Schema(schema_dict)
+        schema = self._build_credentials_schema()
 
         return self.async_show_form(
             step_id="credentials",
             data_schema=schema,
             errors=errors,
-            description_placeholders={
-                "provider": provider
-            },  # For potential translation strings
+            description_placeholders={"provider": provider.provider_name},
         )
 
     async def async_step_model(
@@ -225,46 +279,42 @@ class CustomConversationConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle the model selection step."""
         errors: dict[str, str] = {}
-        provider = self._flow_data[CONF_PRIMARY_PROVIDER]
+        provider: LiteLLMProvider = self._flow_data[CONF_PRIMARY_PROVIDER]
 
         if user_input is not None:
             self._flow_data.update(user_input)
 
-            # Final step: create the config entry
+            final_data = self._flow_data.copy()
+            final_data[CONF_PRIMARY_PROVIDER] = provider.key
+
             return self.async_create_entry(
-                title="Custom Conversation",  # Or use a user-provided title later
-                data=self._flow_data,
-                options=DEFAULT_OPTIONS,  # Start with default options
+                title="Custom Conversation",
+                data=final_data,
+                options=DEFAULT_OPTIONS,
             )
 
-        schema_dict = {}
-        if valid_models:
-            schema_dict[vol.Required(CONF_PRIMARY_CHAT_MODEL)] = SelectSelector(
-                SelectSelectorConfig(options=valid_models, custom_value=True, sort=True)
-            )
-        else:
-            # Allow manual entry if models couldn't be fetched
-            schema_dict[vol.Required(CONF_PRIMARY_CHAT_MODEL)] = str
-
-        schema = vol.Schema(schema_dict)
+        schema = self._build_model_schema(valid_models)
 
         return self.async_show_form(
             step_id="model",
             data_schema=schema,
             errors=errors,
-            description_placeholders={"provider": provider},
+            description_placeholders={"provider": provider.provider_name},
         )
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle reconfiguration of the integration."""
-        # Reconfiguration should re-run the main flow but start with existing data
-        # We store existing data in _flow_data to prepopulate steps
-        if not hasattr(self, "_flow_data") or not self._flow_data:
-            self._flow_data = {**self._get_reconfigure_entry().data}
+        entry = self._get_reconfigure_entry()
+        initial_data = {**entry.data}
+        provider_key = initial_data.get(CONF_PRIMARY_PROVIDER)
 
-        # Start reconfigure flow at the provider step
+        initial_data[CONF_PRIMARY_PROVIDER] = get_provider(provider_key)
+
+        self._flow_data = initial_data
+        self.context["entry_id"] = entry.entry_id
+
         return await self.async_step_reconfigure_provider()
 
     async def async_step_reconfigure_provider(
@@ -274,12 +324,15 @@ class CustomConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            self._flow_data.update(user_input)
-            # If provider changed, might need to clear old incompatible data? For now, just proceed.
+            provider_key = user_input[CONF_PRIMARY_PROVIDER]
+            # If the provider_key is different from the current one, we've changed the provider and need to track it to change the default base_url
+            if provider_key != self._flow_data[CONF_PRIMARY_PROVIDER].key:
+                self._flow_data["changed_provider"] = True
+            self._flow_data[CONF_PRIMARY_PROVIDER] = get_provider(provider_key)
             return await self.async_step_reconfigure_credentials()
-        current_provider = get_provider(
-            self._flow_data.get(CONF_PRIMARY_PROVIDER)["key"]
-        )
+
+        current_provider: LiteLLMProvider = self._flow_data.get(CONF_PRIMARY_PROVIDER)
+
         schema = vol.Schema(
             {
                 vol.Required(
@@ -287,10 +340,8 @@ class CustomConversationConfigFlow(ConfigFlow, domain=DOMAIN):
                 ): SelectSelector(
                     SelectSelectorConfig(
                         options=[
-                            SelectOptionDict(
-                                label=provider.provider_name, value=provider.key
-                            )
-                            for provider in SUPPORTED_PROVIDERS
+                            SelectOptionDict(label=p.provider_name, value=p.key)
+                            for p in SUPPORTED_PROVIDERS
                         ]
                     )
                 )
@@ -305,26 +356,13 @@ class CustomConversationConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle credentials during reconfiguration."""
         errors: dict[str, str] = {}
-        provider = get_provider(self._flow_data[CONF_PRIMARY_PROVIDER])
+        provider: LiteLLMProvider = self._flow_data[CONF_PRIMARY_PROVIDER]
 
         if user_input is not None:
             self._flow_data.update(user_input)
             try:
-                # The get_valid_models call appends /v1 to the base URL, so we need to remove it for this call
-                model_check_url = user_input.get(CONF_PRIMARY_BASE_URL, None)
-                if model_check_url and model_check_url.endswith("/v1"):
-                    model_check_url = model_check_url[:-3]
-
-                # Get the valid models, which will also validate credentials
-                valid_models = await self.hass.async_add_executor_job(
-                    lambda: get_valid_models(
-                        check_provider_endpoint=True,
-                        custom_llm_provider=provider.key,
-                        litellm_params=GenericLiteLLMParams(
-                            api_key=user_input[CONF_PRIMARY_API_KEY],
-                            api_base=model_check_url,
-                        ),
-                    )
+                valid_models = await self._validate_credentials_and_get_models(
+                    self._flow_data
                 )
                 return await self.async_step_reconfigure_model(
                     valid_models=valid_models
@@ -333,31 +371,14 @@ class CustomConversationConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_auth"
             except APIConnectionError:
                 errors["base"] = "cannot_connect"
-            except Exception:
-                errors["base"] = "unknown"
 
-        # Build schema dynamically, defaulting to existing values
-        schema_dict = {
-            vol.Required(
-                CONF_PRIMARY_API_KEY,
-                default=self._flow_data.get(CONF_PRIMARY_API_KEY, ""),
-            ): TextSelector(TextSelectorConfig(type="password")),
-        }
-        if provider == "openai":
-            schema_dict[
-                vol.Optional(
-                    CONF_PRIMARY_BASE_URL,
-                    default=self._flow_data.get(CONF_PRIMARY_BASE_URL, ""),
-                )
-            ] = str
-
-        schema = vol.Schema(schema_dict)
+        schema = self._build_credentials_schema(existing_data=self._flow_data)
 
         return self.async_show_form(
             step_id="reconfigure_credentials",
             data_schema=schema,
             errors=errors,
-            description_placeholders={"provider": provider},
+            description_placeholders={"provider": provider.provider_name},
         )
 
     async def async_step_reconfigure_model(
@@ -367,36 +388,27 @@ class CustomConversationConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle model selection during reconfiguration."""
         errors: dict[str, str] = {}
-        provider = self._flow_data[CONF_PRIMARY_PROVIDER]
+        provider: LiteLLMProvider = self._flow_data[CONF_PRIMARY_PROVIDER]
 
         if user_input is not None:
             self._flow_data.update(user_input)
-            # Update the config entry and reload
+            entry = self._get_reconfigure_entry()
+
+            final_data = self._flow_data.copy()
+            final_data[CONF_PRIMARY_PROVIDER] = provider.key
+
             return self.async_update_reload_and_abort(
-                self._get_reconfigure_entry(), data=self._flow_data
+                entry, data=final_data, reason="reconfigure_successful"
             )
 
-        schema_dict = {}
         current_model = self._flow_data.get(CONF_PRIMARY_CHAT_MODEL)
-        if valid_models:
-            schema_dict[
-                vol.Required(CONF_PRIMARY_CHAT_MODEL, default=current_model)
-            ] = SelectSelector(
-                SelectSelectorConfig(options=valid_models, custom_value=True, sort=True)
-            )
-        else:
-            # Allow manual entry if models couldn't be fetched
-            schema_dict[
-                vol.Required(CONF_PRIMARY_CHAT_MODEL, default=current_model)
-            ] = str
-
-        schema = vol.Schema(schema_dict)
+        schema = self._build_model_schema(valid_models, current_model)
 
         return self.async_show_form(
             step_id="reconfigure_model",
             data_schema=schema,
             errors=errors,
-            description_placeholders={"provider": provider},
+            description_placeholders={"provider": provider.provider_name},
         )
 
     @staticmethod
@@ -407,17 +419,12 @@ class CustomConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         return CustomConversationOptionsFlow(config_entry)
 
 
-# --- Options Flow Handler ---
-
-
 class CustomConversationOptionsFlow(OptionsFlow):
     """Custom Conversation config flow options handler."""
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         """Initialize options flow."""
         self.config_entry = config_entry
-        # Assuming self.hass is available via the OptionsFlow base class
-        # If not, hass might need to be retrieved differently if required by helpers
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -441,14 +448,18 @@ class CustomConversationOptionsFlow(OptionsFlow):
                 )
                 processed_input[CONF_IGNORED_INTENTS_SECTION] = ignored_intents_section
 
-            # Remove empty prompt defaults logic - user should explicitly set or clear
-
+            # If any of the custom prompts are an empty string, use the defaults
+            prompts = processed_input.get(CONF_CUSTOM_PROMPTS_SECTION, {})
+            for prompt in prompts:
+                if not prompts.get(prompt):
+                    prompts[prompt] = DEFAULT_OPTIONS[CONF_CUSTOM_PROMPTS_SECTION].get(
+                        prompt
+                    )
+            processed_input[CONF_CUSTOM_PROMPTS_SECTION] = prompts
             return self.async_create_entry(title="", data=processed_input)
 
         # Build schema for options
         options = self.config_entry.options
-        # Pass hass explicitly if needed by helpers
-        # OptionsFlow inherits from FlowHandler which has self.hass
         hass = self.hass
         hass_apis = self._get_hass_apis(hass)
         intents = await self._get_intents(hass)
@@ -469,16 +480,12 @@ class CustomConversationOptionsFlow(OptionsFlow):
                 vol.Optional(
                     CONF_MAX_TOKENS,
                     default=options.get(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS),
-                ): vol.All(
-                    vol.Coerce(int), vol.Range(min=1)
-                ),  # Ensure positive integer
+                ): vol.All(vol.Coerce(int), vol.Range(min=1)),
                 # Hass API Control
                 vol.Optional(
                     CONF_LLM_HASS_API,
-                    description={
-                        "suggested_value": options.get(CONF_LLM_HASS_API)
-                    },  # Keep suggested value if present
-                    default="none",  # Default to none if not set
+                    description={"suggested_value": options.get(CONF_LLM_HASS_API)},
+                    default="none",
                 ): SelectSelector(SelectSelectorConfig(options=hass_apis)),
                 # Agent Section
                 vol.Required(CONF_AGENTS_SECTION): section(
@@ -520,7 +527,6 @@ class CustomConversationOptionsFlow(OptionsFlow):
                 vol.Required(CONF_CUSTOM_PROMPTS_SECTION): section(
                     vol.Schema(
                         {
-                            # Use .get for defaults to avoid KeyError if section doesn't exist yet
                             vol.Optional(
                                 CONF_INSTRUCTIONS_PROMPT,
                                 default=options.get(
@@ -678,32 +684,26 @@ class CustomConversationOptionsFlow(OptionsFlow):
             data_schema=schema,
         )
 
-    # Helper methods moved inside the class or made static if they don't need self
-    # Pass hass explicitly as OptionsFlow might not have self.hass reliably
     def _get_hass_apis(self, hass: HomeAssistant) -> list[SelectOptionDict]:
         """Get available Home Assistant LLM APIs."""
         hass_apis: list[SelectOptionDict] = [
             SelectOptionDict(label="No control", value="none")
         ]
-        try:
-            hass_apis.extend(
-                SelectOptionDict(label=api.name, value=api.id)
-                for api in llm.async_get_apis(hass)
-            )
-        except Exception as e:
-            _LOGGER.exception("Error fetching HASS APIs: %s", e)
+        hass_apis.extend(
+            SelectOptionDict(label=api.name, value=api.id)
+            for api in llm.async_get_apis(hass)
+        )
         return hass_apis
 
     async def _get_intents(self, hass: HomeAssistant) -> list[SelectOptionDict]:
         """Get available intents."""
         hass_recommended_ignored = llm.AssistAPI.IGNORE_INTENTS
-        intents_list: list[SelectOptionDict] = [
+        return [
             {
-                "value": intent.intent_type,
-                "label": f"{intent.intent_type} (Hass Recommended)"
-                if intent.intent_type in hass_recommended_ignored
-                else intent.intent_type,
+                "value": intent_obj.intent_type,
+                "label": f"{intent_obj.intent_type} (Hass Recommended)"
+                if intent_obj.intent_type in hass_recommended_ignored
+                else intent_obj.intent_type,
             }
-            for intent in intent.async_get(hass)
+            for intent_obj in intent.async_get(hass)
         ]
-        return intents_list

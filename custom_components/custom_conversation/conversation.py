@@ -2,7 +2,6 @@
 
 from collections.abc import AsyncGenerator, Callable
 import json
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, Union, cast
 
 from langfuse.decorators import langfuse_context, observe
@@ -27,7 +26,7 @@ from homeassistant.components.conversation.chat_log import (
     async_get_chat_log,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_API_KEY, CONF_LLM_HASS_API, MATCH_ALL
+from homeassistant.const import CONF_LLM_HASS_API, MATCH_ALL
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import chat_session, device_registry as dr, intent, llm
@@ -38,8 +37,6 @@ from .api import IntentTool
 from .cc_llm import async_update_llm_data
 from .const import (
     CONF_AGENTS_SECTION,
-    CONF_BASE_URL,
-    CONF_CHAT_MODEL,
     CONF_ENABLE_HASS_AGENT,
     CONF_ENABLE_LLM_AGENT,
     CONF_LANGFUSE_HOST,
@@ -48,20 +45,24 @@ from .const import (
     CONF_LANGFUSE_SECTION,
     CONF_LANGFUSE_TAGS,
     CONF_LANGFUSE_TRACING_ENABLED,
-    CONF_LLM_PARAMETERS_SECTION,
+    # CONF_LLM_PARAMETERS_SECTION, # Removed
     CONF_MAX_TOKENS,
+    CONF_PRIMARY_API_KEY,
+    CONF_PRIMARY_BASE_URL,
+    CONF_PRIMARY_CHAT_MODEL,
+    CONF_PRIMARY_PROVIDER,
     CONF_TEMPERATURE,
     CONF_TOP_P,
     CONVERSATION_ENDED_EVENT,
     CONVERSATION_ERROR_EVENT,
     CONVERSATION_STARTED_EVENT,
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_PROVIDER,
+    DEFAULT_TEMPERATURE,
+    DEFAULT_TOP_P,
     DOMAIN,
     HOME_ASSISTANT_AGENT,
     LOGGER,
-    RECOMMENDED_CHAT_MODEL,
-    RECOMMENDED_MAX_TOKENS,
-    RECOMMENDED_TEMPERATURE,
-    RECOMMENDED_TOP_P,
 )
 from .prompt_manager import PromptManager
 
@@ -89,9 +90,7 @@ def _get_llm_details(messages: list[ChatCompletionMessageParam]) -> dict:
             message_tool_call_id = message.get("tool_call_id")
             for tool_call_request in llm_details.get("tool_calls", []):
                 if tool_call_request.get("tool_call_id") == message_tool_call_id:
-                    tool_call_request["tool_response"] = json.loads(
-                        message["content"]
-                    )
+                    tool_call_request["tool_response"] = json.loads(message["content"])
                     new_tags.extend(
                         [
                             f"affected_entity:{entity['id']}"
@@ -190,8 +189,6 @@ async def _transform_litellm_stream(
     current_tool_call: dict | None = None
 
     async for chunk in result:
-
-
         LOGGER.debug("Received chunk: %s", chunk)
         if not chunk.choices:
             if chunk.usage:
@@ -210,11 +207,14 @@ async def _transform_litellm_stream(
                         llm.ToolInput(
                             id=current_tool_call.get("id"),
                             tool_name=current_tool_call.get("name"),
-                            tool_args=json.loads(current_tool_call.get("tool_args", "{}")),
+                            tool_args=json.loads(
+                                current_tool_call.get("tool_args", "{}")
+                            ),
                         )
                     ]
                 }
-            break
+            current_tool_call = None
+            continue
 
         delta = choice.delta
 
@@ -528,13 +528,16 @@ class CustomConversationEntity(
 
         try:
             LOGGER.debug("Updating LLM Data")
+            llm_api = self.entry.options.get(CONF_LLM_HASS_API)
+            if llm_api == "none":
+                llm_api = None
             prompt_object = await async_update_llm_data(
                 self.hass,
                 user_input,
                 self.entry,
                 chat_log,
                 self.prompt_manager,
-                self.entry.options.get(CONF_LLM_HASS_API),
+                llm_api,
             )
             if prompt_object:
                 LOGGER.debug(
@@ -546,8 +549,11 @@ class CustomConversationEntity(
                 LOGGER.debug("No prompt object found")
 
         except conversation.ConverseError as err:
-            return err.as_conversation_result()
-        options = self.entry.options
+            return (
+                err.as_conversation_result(),
+                {},
+            )
+
         tools: list[ChatCompletionToolParam] | None = None
         if chat_log.llm_api:
             tools = [
@@ -559,8 +565,9 @@ class CustomConversationEntity(
         ]
         # To prevent infinite loops, we limit the number of iterations
         for _iteration in range(MAX_TOOL_ITERATIONS):
+            LOGGER.debug("Iteration %s, messages: %s", _iteration, messages)
             transformed_stream = await self._async_generate_completion(
-                config_options=options,
+                entry=self.entry,
                 messages=messages,
                 tools=tools,
                 conversation_id=chat_log.conversation_id,
@@ -577,20 +584,23 @@ class CustomConversationEntity(
                     ]
                 )
             except HomeAssistantError as err:
-                 LOGGER.error("Error processing LLM stream: %s", err)
-                 raise
+                LOGGER.error("Error processing LLM stream: %s", err)
+                raise
             except Exception as err:
-                 LOGGER.error("Unexpected error processing LLM stream: %s", err)
-                 raise HomeAssistantError("Error processing LLM response") from err
+                LOGGER.error("Unexpected error processing LLM stream: %s", err)
+                raise HomeAssistantError("Error processing LLM response") from err
 
             if not chat_log.unresponded_tool_results:
-                 break
+                break
 
         final_assistant_message = chat_log.content[-1]
         if not isinstance(final_assistant_message, AssistantContent):
-             # This should not happen if the stream processed correctly
-             LOGGER.error("Last message in chat log is not AssistantContent: %s", final_assistant_message)
-             raise HomeAssistantError("LLM response processing failed")
+            # This should not happen if the stream processed correctly
+            LOGGER.error(
+                "Last message in chat log is not AssistantContent: %s",
+                final_assistant_message,
+            )
+            raise HomeAssistantError("LLM response processing failed")
 
         intent_response = intent.IntentResponse(language=user_input.language)
         intent_response.async_set_speech(final_assistant_message.content or "")
@@ -604,31 +614,58 @@ class CustomConversationEntity(
             continue_conversation=chat_log.continue_conversation,
         ), llm_details
 
-    @observe(name="cc_generate_completion", as_type="generation")
+    @observe(
+        name="cc_generate_completion",
+        as_type="generation",
+        capture_input=False,
+        capture_output=False,
+    )
     async def _async_generate_completion(
         self,
-        config_options: MappingProxyType[str, Any],
+        entry: CustomConversationConfigEntry,  # Pass full entry
         messages: list[ChatCompletionMessageParam],
         tools: list[ChatCompletionToolParam] | None,
         conversation_id: str,
         prompt: Union["PromptClient", None] = None,
     ) -> AsyncGenerator[AssistantContentDeltaDict, None]:
         """Generate a completion stream from the LLM."""
+        cleaned_input = {
+            "messages": messages,
+            "tools": tools,
+            "conversation_id": conversation_id,
+            "prompt": prompt.__dict__ if prompt else None,
+            "config_entry": {
+                "entry_id": entry.entry_id,
+                "title": entry.title,
+                "options": {**entry.options},
+            },
+        }
+        langfuse_context.update_current_observation(
+            input=cleaned_input,
+        )
         generation_id = langfuse_context.get_current_observation_id()
         existing_trace_id = langfuse_context.get_current_trace_id()
 
-        llm_params = config_options.get(CONF_LLM_PARAMETERS_SECTION, {})
-        langfuse_params = config_options.get(CONF_LANGFUSE_SECTION, {})
+        model_name = entry.data.get(CONF_PRIMARY_CHAT_MODEL)
+        api_key = entry.data.get(CONF_PRIMARY_API_KEY)
+        base_url = entry.data.get(CONF_PRIMARY_BASE_URL)
+
+        temperature = entry.options.get(CONF_TEMPERATURE, DEFAULT_TEMPERATURE)
+        top_p = entry.options.get(CONF_TOP_P, DEFAULT_TOP_P)
+        max_tokens = entry.options.get(CONF_MAX_TOKENS, DEFAULT_MAX_TOKENS)
+
+        langfuse_params = entry.options.get(CONF_LANGFUSE_SECTION, {})
+
 
         completion_kwargs = {
-            "api_key": self.entry.data.get(CONF_API_KEY),
-            "base_url": self.entry.data.get(CONF_BASE_URL),
-            "model": f"openai/{llm_params.get(CONF_CHAT_MODEL, RECOMMENDED_CHAT_MODEL)}",
+            "api_key": api_key,
+            "base_url": base_url,
+            "model": model_name,
             "messages": messages,
             "tools": tools,
-            "max_tokens": llm_params.get(CONF_MAX_TOKENS, RECOMMENDED_MAX_TOKENS),
-            "top_p": llm_params.get(CONF_TOP_P, RECOMMENDED_TOP_P),
-            "temperature": llm_params.get(CONF_TEMPERATURE, RECOMMENDED_TEMPERATURE),
+            "max_tokens": max_tokens,
+            "top_p": top_p,
+            "temperature": temperature,
             "user": conversation_id,
             "stream": True,
             "metadata": {
@@ -640,8 +677,13 @@ class CustomConversationEntity(
             "langfuse_secret_key": langfuse_params.get(CONF_LANGFUSE_SECRET_KEY),
             "langfuse_public_key": langfuse_params.get(CONF_LANGFUSE_PUBLIC_KEY),
             "langfuse_host": langfuse_params.get(CONF_LANGFUSE_HOST),
-            "callbacks": ["langfuse"] if langfuse_params.get(CONF_LANGFUSE_TRACING_ENABLED) else None,
+            "stream_options": {"include_usage": True},
+            "callbacks": ["langfuse"]
+            if langfuse_params.get(CONF_LANGFUSE_TRACING_ENABLED)
+            else None,
         }
+        if not base_url:
+            completion_kwargs.pop("base_url")
         # The "content" field for assistant role messages can be None if it's a tool call, but Google's OpenAI
         # endpoint can't handle this, so we set the content to "Tool Call"
         for message in completion_kwargs["messages"]:
@@ -649,9 +691,9 @@ class CustomConversationEntity(
                 message["content"] = "Tool Call"
 
         try:
-            raw_stream: AsyncGenerator[StreamingChatCompletionChunk, None] = await acompletion(
-                 **completion_kwargs
-            )
+            raw_stream: AsyncGenerator[
+                StreamingChatCompletionChunk
+            ] = await acompletion(**completion_kwargs)
             langfuse_context.update_current_observation(prompt=prompt)
 
             return _transform_litellm_stream(raw_stream)
@@ -663,9 +705,17 @@ class CustomConversationEntity(
             LOGGER.error("API error during acompletion: %s", err)
             raise
         except Exception as err:
-            LOGGER.error("Unexpected error generating completion with acompletion: %s", err)
-            debug_kwargs = {k: v for k, v in completion_kwargs.items() if k not in ['api_key', 'langfuse_secret_key']}
-            LOGGER.debug("acompletion kwargs (sensitive info removed): %s", debug_kwargs)
+            LOGGER.error(
+                "Unexpected error generating completion with acompletion: %s", err
+            )
+            debug_kwargs = {
+                k: v
+                for k, v in completion_kwargs.items()
+                if k not in ["api_key", "langfuse_secret_key"]
+            }
+            LOGGER.debug(
+                "acompletion kwargs (sensitive info removed): %s", debug_kwargs
+            )
             raise HomeAssistantError("Error generating LLM completion stream") from err
 
     async def _async_entry_update_listener(

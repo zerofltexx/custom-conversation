@@ -4,23 +4,31 @@ import logging
 
 DOMAIN = "custom_conversation"
 LOGGER = logging.getLogger(__package__)
+
+CONFIG_VERSION = 2
+
+CONF_PRIMARY_PROVIDER = "primary_provider"
+CONF_PRIMARY_API_KEY = "primary_api_key"
+CONF_PRIMARY_BASE_URL = "primary_base_url"
+CONF_PRIMARY_CHAT_MODEL = "primary_chat_model"
+
+DEFAULT_PROVIDER = "openai"
+
 SERVICE_GENERATE_IMAGE = "generate_image"
-CONF_CHAT_MODEL = "chat_model"
 CONF_ENABLE_HASS_AGENT = "enable_home_assistant_agent"
 CONF_ENABLE_LLM_AGENT = "enable_llm_agent"
 CONF_AGENTS_SECTION = "agents"
 CONF_LLM_PARAMETERS_SECTION = "llm_parameters"
 CONF_IGNORED_INTENTS_SECTION = "ignored_intents_section"
 CONF_IGNORED_INTENTS = "ignored_intents"
-RECOMMENDED_CHAT_MODEL = "gpt-4o-mini"
+
 CONF_MAX_TOKENS = "max_tokens"
-RECOMMENDED_MAX_TOKENS = 150
+DEFAULT_MAX_TOKENS = 150
 CONF_TOP_P = "top_p"
-RECOMMENDED_TOP_P = 1.0
+DEFAULT_TOP_P = 1.0
 CONF_TEMPERATURE = "temperature"
-RECOMMENDED_TEMPERATURE = 1.0
-CONF_BASE_URL = "base_url"
-RECOMMENDED_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_TEMPERATURE = 1.0
+
 LLM_API_ID = "custom-conversation"
 HOME_ASSISTANT_AGENT = "conversation.home_assistant"
 CONVERSATION_STARTED_EVENT = f"{DOMAIN}_conversation_started"
@@ -90,3 +98,13 @@ CONF_LANGFUSE_SCORE_ENABLED = "langfuse_score_enabled"
 LANGFUSE_SCORE_NAME = "cc_score"
 LANGFUSE_SCORE_POSITIVE = "positive"
 LANGFUSE_SCORE_NEGATIVE = "negative"
+
+# These intents are deprecated, but also in the IGNORE_INTENTS list
+HASS_DEPRECATED_INTENTS = [
+    "HassOpenCover",
+    "HassCloseCover",
+]
+
+# Deprecated constants for migrations only
+CONF_CHAT_MODEL = "chat_model"
+CONF_BASE_URL = "base_url"

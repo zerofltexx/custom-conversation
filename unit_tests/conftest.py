@@ -1,21 +1,29 @@
 """Fixtures for Custom Conversation tests."""
 from .test_helpers import setup_mocks
+
 setup_mocks()
-import pytest
-from homeassistant.core import HomeAssistant
-from homeassistant.setup import async_setup_component
 from unittest.mock import patch
+
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+
 from custom_components.custom_conversation.const import (
-    CONF_CUSTOM_PROMPTS_SECTION,
-    CONF_PROMPT_BASE,
-    CONF_INSTRUCTIONS_PROMPT,
     CONF_API_PROMPT_BASE,
+    CONF_CUSTOM_PROMPTS_SECTION,
+    CONF_INSTRUCTIONS_PROMPT,
+    CONF_LANGFUSE_SECTION,
+    CONF_PRIMARY_API_KEY,
+    CONF_PRIMARY_BASE_URL,
+    CONF_PRIMARY_CHAT_MODEL,
+    CONF_PRIMARY_PROVIDER,
+    CONF_PROMPT_BASE,
     CONF_PROMPT_DEVICE_KNOWN_LOCATION,
     CONF_PROMPT_NO_ENABLED_ENTITIES,
-    CONF_LANGFUSE_SECTION,
     DOMAIN,
 )
+from homeassistant.core import HomeAssistant
+from homeassistant.setup import async_setup_component
+
 
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations):
@@ -40,9 +48,11 @@ def config_entry(hass: HomeAssistant) -> MockConfigEntry:
     entry = MockConfigEntry(
         title="Test",
         domain=DOMAIN,
-        data={
-           "api_key": "test-api-key",
-           "base_url": "https://api.openai.com/v1",
+        data={ # Use new data structure
+            CONF_PRIMARY_PROVIDER: "openai",
+            CONF_PRIMARY_API_KEY: "test-api-key",
+            CONF_PRIMARY_BASE_URL: "https://api.openai.com/v1",
+            CONF_PRIMARY_CHAT_MODEL: "gpt-4o-mini",
         },
         options={
             CONF_CUSTOM_PROMPTS_SECTION: {
@@ -57,7 +67,7 @@ def config_entry(hass: HomeAssistant) -> MockConfigEntry:
     )
     entry.add_to_hass(hass)
     hass.config_entries.async_setup(entry.entry_id)
-    hass.async_block_till_done
+    hass.async_block_till_done()
     return entry
 
 @pytest.fixture(autouse=True)
