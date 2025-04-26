@@ -25,6 +25,7 @@ from custom_components.custom_conversation.const import (
     CONF_PRIMARY_BASE_URL,
     CONF_PRIMARY_CHAT_MODEL,
     CONF_PRIMARY_PROVIDER,
+    CONFIG_VERSION,
     DOMAIN,
     LLM_API_ID,
 )
@@ -54,7 +55,7 @@ else:
 def pytest_runtest_setup():
     """Enable socket access and allow specific hosts for E2E tests."""
     enable_socket()
-    socket_allow_hosts([*ALLOWED_HOSTS, "localhost"], allow_unix_socket=True)
+    socket_allow_hosts([*ALLOWED_HOSTS, "localhost", "127.0.0.1", "::1", "localhost:11434"], allow_unix_socket=True)
 
 
 @dataclasses.dataclass
@@ -96,7 +97,7 @@ class LLMProviderConfig:
         data = {
             CONF_PRIMARY_API_KEY: self.get_api_key(),
             CONF_PRIMARY_CHAT_MODEL: self.get_model(),
-            CONF_PRIMARY_PROVIDER: self.get_primary_provider(),
+            CONF_PRIMARY_PROVIDER: self.get_primary_provider().key,
         }
         base_url = self.get_base_url()
         if base_url:
@@ -115,7 +116,7 @@ SUPPORTED_PROVIDERS = [
         model_env_var="OPENAI_MODEL",
         base_url_env_var="OPENAI_BASE_URL",
         default_base_url="https://api.openai.com/v1",
-        default_model="openai/gpt-4o",
+        default_model="gpt-4o",
         primary_provider="openai"
     ),
     LLMProviderConfig(
@@ -124,7 +125,7 @@ SUPPORTED_PROVIDERS = [
         model_env_var="GEMINI_OPENAI_MODEL",
         base_url_env_var="GEMINI_OPENAI_BASE_URL",
         default_base_url=None,
-        default_model="openai/gemini-1.5-flash-latest",
+        default_model="gemini-1.5-flash-latest",
         primary_provider="openai"
     ),
     LLMProviderConfig(
@@ -133,8 +134,35 @@ SUPPORTED_PROVIDERS = [
         model_env_var="GEMINI_MODEL",
         base_url_env_var="GEMINI_BASE_URL",
         default_base_url=None,
-        default_model="gemini/gemini-1.5-flash-latest",
+        default_model="gemini-1.5-flash-latest",
         primary_provider="gemini"
+    ),
+    LLMProviderConfig(
+        id="ollama",
+        api_key_env_var="OLLAMA_API_KEY",
+        model_env_var="OLLAMA_MODEL",
+        base_url_env_var="OLLAMA_BASE_URL_PATH",
+        default_base_url=None,
+        default_model="llama2-7b-chat",
+        primary_provider="ollama"
+    ),
+    LLMProviderConfig(
+        id="ollama_chat",
+        api_key_env_var="OLLAMA_API_KEY",
+        model_env_var="OLLAMA_CHAT_MODEL",
+        base_url_env_var="OLLAMA_BASE_URL_PATH",
+        default_base_url=None,
+        default_model="llama2-7b-chat",
+        primary_provider="ollama_chat"
+    ),
+    LLMProviderConfig(
+        id="ollama_openai_compat",
+        api_key_env_var="OLLAMA_API_KEY",
+        model_env_var="OLLAMA_MODEL",
+        base_url_env_var="OLLAMA_BASE_URL_OPENAI_PATH",
+        default_base_url=None,
+        default_model="llama2-7b-chat",
+        primary_provider="openai"
     )
 ]
 
@@ -211,6 +239,7 @@ async def setup_config_entry(hass: HomeAssistant, llm_config: LLMProviderConfig)
 
     entry = MockConfigEntry(
         domain=DOMAIN,
+        version=CONFIG_VERSION,
         title=f"{llm_config.id} E2E Test",
         data=config_data,
         options=final_options,
