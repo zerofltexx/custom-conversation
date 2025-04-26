@@ -7,7 +7,7 @@ and experimentation features for those who want to dive deeper into LLM integrat
 ## Features
 
 ### Core Features
-- Compatible with any OpenAI API-compatible LLM through configurable base URL
+- Compatible with multiple LLM providers, via LiteLLM. See [Supported Providers](docs/supported-providers.md) for the list of supported providers.
 - Dynamic reconfiguration of API settings (change your base URL without having to create a new instance)
 - Enhanced event system for conversation tracking and debugging
 - Configurable intent handling and fallback behavior
@@ -40,7 +40,11 @@ to add this as a custom repository, or add it manually.
 * Go to your Devices and Services page
 * Click "Add Integration"
 * Search for Custom Conversation and click on it
-* You'll be asked for your api key, and the base URL for your OpenAI-compatible LLM API. Enter those, and click "Submit".
+* First select your provider, and click "Submit".
+* On the next screen, you'll be asked to enter your API key and optionally a base URL, if supported by the provider.
+* On the next screen, you'll be asked to choose a model. For supported providers, a list of available models will be shown. For 
+unsupported providers, you can enter a model name manually.
+* After selecting or entering a model, click "Submit" to complete the setup.
 
 That's it for the basic installation, but if you're using this component, you probably want to jump right to the Configuration section to
 learn how to tweak all of the settings.
@@ -75,7 +79,6 @@ functionality of this component.
  
 
 ### LLM Parameters
-- **Chat Model**: Choose the model to use
 - **Max Tokens**: Maximum response length (default: 150)
 - **Temperature**: Controls response randomness (0-2, default: 1.0)
 - **Top P**: Controls response diversity (0-1, default: 1.0)
