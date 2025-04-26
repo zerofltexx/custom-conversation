@@ -96,8 +96,9 @@ def _parse_tool_args(arguments: dict[str, Any]) -> dict[str, Any]:
         try:
             arguments = arguments.replace("null", "None")
             arguments = ast.literal_eval(arguments)
-        except ValueError:
+        except ValueError as err:
             LOGGER.error("Failed to parse tool arguments: %s", arguments)
+            raise HomeAssistantError("Failed to parse tool arguments") from err
     return {k: _fix_invalid_arguments(v) for k, v in arguments.items() if v}
 
 def _get_llm_details(messages: list[ChatCompletionMessageParam]) -> dict:
