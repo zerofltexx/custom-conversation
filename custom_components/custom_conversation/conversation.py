@@ -1,7 +1,7 @@
 """Conversation support for Custom Conversation APIs."""
 
-from collections.abc import AsyncGenerator, Callable
 import ast
+from collections.abc import AsyncGenerator, Callable
 import json
 from typing import TYPE_CHECKING, Any, Literal, Union, cast
 
@@ -442,13 +442,6 @@ class CustomConversationEntity(
                             new_tags.append(f"affected_entity:{success_result.id}")
                     langfuse_context.update_current_observation(output=result.as_dict())
                     langfuse_context.update_current_trace(tags=new_tags)
-                    async for _tool_result in chat_log.async_add_assistant_content(
-                        AssistantContent(
-                            agent_id=user_input.agent_id,
-                            content=result.response.speech,
-                        )
-                    ):
-                        pass
                     return conversation.ConversationResult(
                         response=result.response,
                         conversation_id=session.conversation_id,
