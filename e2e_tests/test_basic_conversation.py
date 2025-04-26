@@ -6,6 +6,7 @@ from custom_components.custom_conversation.const import (
     CONF_AGENTS_SECTION,
     CONF_ENABLE_HASS_AGENT,
     CONF_ENABLE_LLM_AGENT,
+    CONFIG_VERSION,
     CONVERSATION_ENDED_EVENT,
     CONVERSATION_STARTED_EVENT,
     DOMAIN,
@@ -37,6 +38,7 @@ async def test_basic_conversation(
 
     config_entry = MockConfigEntry(
         domain=DOMAIN,
+        version=CONFIG_VERSION,
         title=f"{llm_config.id} E2E Test",
         data=config_data,
         options=final_options,

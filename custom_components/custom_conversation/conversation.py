@@ -1,6 +1,7 @@
 """Conversation support for Custom Conversation APIs."""
 
 from collections.abc import AsyncGenerator, Callable
+import ast
 import json
 from typing import TYPE_CHECKING, Any, Literal, Union, cast
 
@@ -49,6 +50,7 @@ from .const import (
     CONF_PRIMARY_API_KEY,
     CONF_PRIMARY_BASE_URL,
     CONF_PRIMARY_CHAT_MODEL,
+    CONF_PRIMARY_PROVIDER,
     CONF_TEMPERATURE,
     CONF_TOP_P,
     CONVERSATION_ENDED_EVENT,
@@ -66,6 +68,38 @@ from .prompt_manager import PromptManager
 # Max number of back and forth with the LLM to generate a response
 MAX_TOOL_ITERATIONS = 10
 
+def _fix_invalid_arguments(value: Any) -> Any:
+    """Attempt to repair incorrectly formatted json function arguments.
+
+    Small models (for example llama3.1 8B) may produce invalid argument values
+    which we attempt to repair here.
+    """
+    if not isinstance(value, str):
+        return value
+    if (value.startswith("[") and value.endswith("]")) or (
+        value.startswith("{") and value.endswith("}")
+    ):
+        try:
+            return json.loads(value)
+        except json.decoder.JSONDecodeError:
+            pass
+    return value
+
+def _parse_tool_args(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Rewrite tool arguments.
+
+    This function improves tool use quality by fixing common mistakes made by
+    small local tool use models. This will repair invalid json arguments and
+    omit unnecessary arguments with empty values that will fail intent parsing.
+    """
+    if not isinstance(arguments, dict):
+        try:
+            arguments = arguments.replace("null", "None")
+            arguments = ast.literal_eval(arguments)
+        except ValueError as err:
+            LOGGER.error("Failed to parse tool arguments: %s", arguments)
+            raise HomeAssistantError("Failed to parse tool arguments") from err
+    return {k: _fix_invalid_arguments(v) for k, v in arguments.items() if v}
 
 def _get_llm_details(messages: list[ChatCompletionMessageParam]) -> dict:
     """Get the LLM details from the messages."""
@@ -204,7 +238,7 @@ async def _transform_litellm_stream(
                         llm.ToolInput(
                             id=current_tool_call.get("id"),
                             tool_name=current_tool_call.get("name"),
-                            tool_args=json.loads(
+                            tool_args=_parse_tool_args(
                                 current_tool_call.get("tool_args", "{}")
                             ),
                         )
@@ -644,6 +678,7 @@ class CustomConversationEntity(
         existing_trace_id = langfuse_context.get_current_trace_id()
 
         model_name = entry.data.get(CONF_PRIMARY_CHAT_MODEL)
+        provider = entry.data.get(CONF_PRIMARY_PROVIDER)
         api_key = entry.data.get(CONF_PRIMARY_API_KEY)
         base_url = entry.data.get(CONF_PRIMARY_BASE_URL)
 
@@ -657,7 +692,7 @@ class CustomConversationEntity(
         completion_kwargs = {
             "api_key": api_key,
             "base_url": base_url,
-            "model": model_name,
+            "model": f"{provider}/{model_name}",
             "messages": messages,
             "tools": tools,
             "max_tokens": max_tokens,

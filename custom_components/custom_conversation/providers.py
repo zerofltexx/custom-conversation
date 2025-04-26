@@ -23,7 +23,24 @@ gemini = LiteLLMProvider(
     #supports_custom_base_url=True,
 )
 
-SUPPORTED_PROVIDERS = [openai, gemini]
+ollama = LiteLLMProvider(
+    key="ollama",
+    provider_name="Ollama",
+    supports_custom_base_url=True,
+)
+
+ollama_chat = LiteLLMProvider(
+    key="ollama_chat",
+    provider_name="Ollama Chat",
+    supports_custom_base_url=True,
+)
+
+SUPPORTED_PROVIDERS = [
+    openai,
+    gemini,
+    # ollama, disabled pending litellm fixes for https://github.com/BerriAI/litellm/issues/6135 and https://github.com/BerriAI/litellm/issues/9602
+    # ollama_chat
+]
 
 def get_provider(provider_key: str) -> LiteLLMProvider | None:
     """Get the provider by key."""
