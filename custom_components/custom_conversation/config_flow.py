@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from litellm.exceptions import APIConnectionError, AuthenticationError
-from litellm.utils import ProviderConfigManager
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
@@ -149,12 +148,7 @@ class CustomConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         if default_base_url is None or self._flow_data.get("changed_provider"):
             # If the base URL is not set or the provider has changed, fetch the default base URL
             if provider.supports_custom_base_url:
-                provider_info = ProviderConfigManager.get_provider_model_info(
-                    model="", provider=provider.key
-                )
-                default_base_url = (
-                    provider_info.get_api_base() if provider_info else None
-                )
+                default_base_url = provider.default_base_url
             else:  # If the provider does not support custom base URL, set it to None
                 default_base_url = None
                 self._flow_data.pop(CONF_PRIMARY_BASE_URL, None)
