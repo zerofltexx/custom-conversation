@@ -42,7 +42,7 @@ env_path = Path(__file__).parent / ".env"
 if env_path.is_file():
     load_dotenv(dotenv_path=env_path, verbose=True)
 
-ALLOWED_HOSTS = ["api.openai.com", "generativelanguage.googleapis.com"]
+ALLOWED_HOSTS = ["api.openai.com", "generativelanguage.googleapis.com", "openrouter.ai"]
 LANGFUSE_HOST_ENV = os.getenv("LANGFUSE_HOST")
 if LANGFUSE_HOST_ENV:
     LANGFUSE_HOSTNAME = LANGFUSE_HOST_ENV.split("://")[-1].split("/")[0]
@@ -163,6 +163,15 @@ SUPPORTED_PROVIDERS = [
         default_base_url=None,
         default_model="llama2-7b-chat",
         primary_provider="openai"
+    ),
+    LLMProviderConfig(
+        id="openrouter",
+        api_key_env_var="OPENROUTER_API_KEY",
+        model_env_var="OPENROUTER_MODEL",
+        base_url_env_var="OPENROUTER_BASE_URL_PATH",
+        default_base_url=None,
+        default_model="google/gemini-2.0-flash-exp:free",
+        primary_provider="openrouter"
     )
 ]
 
