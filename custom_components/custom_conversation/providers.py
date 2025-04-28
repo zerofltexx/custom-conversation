@@ -51,8 +51,8 @@ class LiteLLMProvider:
         else:
             LOGGER.error(
                 "Error fetching models: %s - %s",
-                {response.status_code},
-                {response.text},
+                response.status_code,
+                response.text,
             )
         return models
 
@@ -93,8 +93,8 @@ class GeminiProvider(LiteLLMProvider):
         else:
             LOGGER.error(
                 "Error fetching models: %s - %s",
-                {response.status_code},
-                {response.text},
+                response.status_code,
+                response.text,
             )
         return []
 
