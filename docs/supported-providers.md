@@ -6,6 +6,9 @@ Support for multiple providers is provided by LiteLLM, but as each provider has 
 OpenAI is supported natively. The base URL is configurable to support proxies or other providers that are compatible with the OpenAI API. Note that supposedly "OpenAI-compatible" APIs are sometimes not fully compatible. Assuming the API is fully compatible, streaming and tool calling are supported.
 ### Gemini via Google AI Studio
 Gemini is supported via the Google AI Studio API. The base URL is not currently configurable due to a LiteLLM [bug](https://github.com/BerriAI/litellm/issues/7830). This will be enabled once the underlying bug is fixed. Streaming and tool calling are supported.
+### OpenRouter
+OpenRouter is supported natively. The base URL is configurable to support proxies or other providers that are compatible with the OpenRouter API. Streaming 
+and tool calling are supported, but be aware that many of OpenRouter's free models do not support tool calling. 
 
 ## Support through the OpenAI API
 ### Ollama

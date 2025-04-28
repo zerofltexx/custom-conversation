@@ -13,6 +13,7 @@ class LiteLLMProvider:
         self,
         key: str,
         provider_name: str,
+        manual_default_base_url: str | None = None,
         model_list_path: str | None = None,
         supports_custom_base_url: bool = False,
     ) -> None:
@@ -27,6 +28,8 @@ class LiteLLMProvider:
         )
         if provider_model_info:
             self.default_base_url = provider_model_info.get_api_base()
+        elif manual_default_base_url:
+            self.default_base_url = manual_default_base_url
 
     def get_supported_models(
         self, base_url: str | None, api_key: str | None
@@ -108,6 +111,14 @@ openai = LiteLLMProvider(
 
 gemini = GeminiProvider()
 
+openrouter = LiteLLMProvider(
+    key="openrouter",
+    provider_name="OpenRouter",
+    model_list_path="/models",
+    supports_custom_base_url=True,
+    manual_default_base_url="https://openrouter.ai/api/v1",
+)
+
 ollama = LiteLLMProvider(
     key="ollama",
     provider_name="Ollama",
@@ -123,6 +134,7 @@ ollama_chat = LiteLLMProvider(
 SUPPORTED_PROVIDERS = [
     openai,
     gemini,
+    openrouter,
     # ollama, disabled pending litellm fixes for https://github.com/BerriAI/litellm/issues/6135 and https://github.com/BerriAI/litellm/issues/9602
     # ollama_chat
 ]
