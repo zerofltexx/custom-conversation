@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from litellm.exceptions import APIConnectionError, AuthenticationError
-from litellm.types.router import GenericLiteLLMParams
 from litellm.utils import ProviderConfigManager
 import voluptuous as vol
 
@@ -74,7 +73,6 @@ from .const import (
     DOMAIN,
     LOGGER,
 )
-from .litellm_utils import get_valid_models
 from .providers import SUPPORTED_PROVIDERS, LiteLLMProvider, get_provider
 
 _LOGGER = LOGGER
@@ -125,26 +123,12 @@ class CustomConversationConfigFlow(ConfigFlow, domain=DOMAIN):
         api_key = user_input.get(CONF_PRIMARY_API_KEY)
         base_url = user_input.get(CONF_PRIMARY_BASE_URL)
 
-        # The get_valid_models call appends /v1 to the base URL, so we need to remove it for this call
-        model_check_url = base_url
-        if model_check_url and model_check_url.endswith("/v1"):
-            model_check_url = model_check_url[:-3]
-        elif not model_check_url:
-            provider_info = ProviderConfigManager.get_provider_model_info(
-                model="", provider=provider.key
-            )
-            model_check_url = provider_info.get_api_base() if provider_info else None
-
         return await self.hass.async_add_executor_job(
-            lambda: get_valid_models(
-                check_provider_endpoint=True,
-                custom_llm_provider=provider.key,
-                litellm_params=GenericLiteLLMParams(
-                    api_key=api_key,
-                    api_base=model_check_url,
+            lambda: provider.get_supported_models(
+                base_url=base_url,
+                api_key=api_key
                 ),
             )
-        )
 
     def _build_credentials_schema(
         self, existing_data: dict[str, Any] | None = None
