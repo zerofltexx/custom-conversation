@@ -12,6 +12,15 @@ CONF_PRIMARY_API_KEY = "primary_api_key"
 CONF_PRIMARY_BASE_URL = "primary_base_url"
 CONF_PRIMARY_CHAT_MODEL = "primary_chat_model"
 
+CONF_SECONDARY_PROVIDER_ENABLED = "secondary_provider_enabled"
+
+CONF_SECONDARY_PROVIDER = "secondary_provider"
+CONF_SECONDARY_API_KEY = "secondary_api_key"
+CONF_SECONDARY_BASE_URL = "secondary_base_url"
+CONF_SECONDARY_CHAT_MODEL = "secondary_chat_model"
+
+CONFIGURING_SECONDARY_PROVIDER = "configuring_secondary_provider"
+
 DEFAULT_PROVIDER = "openai"
 
 SERVICE_GENERATE_IMAGE = "generate_image"

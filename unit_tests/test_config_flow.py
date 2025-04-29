@@ -33,8 +33,10 @@ from custom_components.custom_conversation.const import (
     CONF_PROMPT_EXPOSED_ENTITIES,
     CONF_PROMPT_NO_ENABLED_ENTITIES,
     CONF_PROMPT_TIMERS_UNSUPPORTED,
+    CONF_SECONDARY_PROVIDER_ENABLED,
     CONF_TEMPERATURE,
     CONF_TOP_P,
+    CONFIGURING_SECONDARY_PROVIDER,
     DEFAULT_API_PROMPT_BASE,
     DEFAULT_API_PROMPT_DEVICE_KNOWN_LOCATION,
     DEFAULT_API_PROMPT_DEVICE_UNKNOWN_LOCATION,
@@ -104,6 +106,8 @@ async def test_config_flow_user_steps_openai(hass: HomeAssistant):
         CONF_PRIMARY_API_KEY: "sk-testkey",
         CONF_PRIMARY_BASE_URL: "https://api.openai.com/v1",
         CONF_PRIMARY_CHAT_MODEL: "gpt-4o-mini",
+        CONFIGURING_SECONDARY_PROVIDER: False,
+        CONF_SECONDARY_PROVIDER_ENABLED: False,
     }
     assert result["options"] == DEFAULT_OPTIONS
 

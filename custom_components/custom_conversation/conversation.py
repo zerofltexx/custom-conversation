@@ -9,7 +9,7 @@ from langfuse.decorators import langfuse_context, observe
 
 if TYPE_CHECKING:
     from langfuse.types import PromptClient
-from litellm import OpenAIError, RateLimitError, acompletion
+from litellm import OpenAIError, RateLimitError, Router
 from litellm.types.completion import (
     ChatCompletionAssistantMessageParam,
     ChatCompletionMessageParam,
@@ -51,6 +51,11 @@ from .const import (
     CONF_PRIMARY_BASE_URL,
     CONF_PRIMARY_CHAT_MODEL,
     CONF_PRIMARY_PROVIDER,
+    CONF_SECONDARY_API_KEY,
+    CONF_SECONDARY_BASE_URL,
+    CONF_SECONDARY_CHAT_MODEL,
+    CONF_SECONDARY_PROVIDER,
+    CONF_SECONDARY_PROVIDER_ENABLED,
     CONF_TEMPERATURE,
     CONF_TOP_P,
     CONVERSATION_ENDED_EVENT,
@@ -67,6 +72,7 @@ from .prompt_manager import PromptManager
 
 # Max number of back and forth with the LLM to generate a response
 MAX_TOOL_ITERATIONS = 10
+
 
 def _fix_invalid_arguments(value: Any) -> Any:
     """Attempt to repair incorrectly formatted json function arguments.
@@ -85,6 +91,7 @@ def _fix_invalid_arguments(value: Any) -> Any:
             pass
     return value
 
+
 def _parse_tool_args(arguments: dict[str, Any]) -> dict[str, Any]:
     """Rewrite tool arguments.
 
@@ -100,6 +107,7 @@ def _parse_tool_args(arguments: dict[str, Any]) -> dict[str, Any]:
             LOGGER.error("Failed to parse tool arguments: %s", arguments)
             raise HomeAssistantError("Failed to parse tool arguments") from err
     return {k: _fix_invalid_arguments(v) for k, v in arguments.items() if v}
+
 
 def _get_llm_details(messages: list[ChatCompletionMessageParam]) -> dict:
     """Get the LLM details from the messages."""
@@ -292,6 +300,7 @@ async def _transform_litellm_stream(
             "name": delta_tool_call.function.name,
             "tool_args": delta_tool_call.function.arguments or "",
         }
+
 
 class CustomConversationEntity(
     conversation.ConversationEntity, conversation.AbstractConversationAgent
@@ -646,7 +655,7 @@ class CustomConversationEntity(
     )
     async def _async_generate_completion(
         self,
-        entry: CustomConversationConfigEntry,  # Pass full entry
+        entry: CustomConversationConfigEntry,
         messages: list[ChatCompletionMessageParam],
         tools: list[ChatCompletionToolParam] | None,
         conversation_id: str,
@@ -669,11 +678,37 @@ class CustomConversationEntity(
         )
         generation_id = langfuse_context.get_current_observation_id()
         existing_trace_id = langfuse_context.get_current_trace_id()
+        primary_model = f"{entry.data.get(CONF_PRIMARY_PROVIDER)}/{entry.data.get(CONF_PRIMARY_CHAT_MODEL)}"
+        secondary_model = f"{entry.data.get(CONF_SECONDARY_PROVIDER)}/{entry.data.get(CONF_SECONDARY_CHAT_MODEL)}" if entry.data.get(CONF_SECONDARY_PROVIDER_ENABLED) else ""
+        fallbacks = []
+        model_list = [
+            {
+                "model_name": primary_model,
+                "litellm_params": {
+                    "model": primary_model,
+                    "api_base": entry.data.get(CONF_PRIMARY_BASE_URL),
+                    "api_key": entry.data.get(CONF_PRIMARY_API_KEY),
+                },
+            },
+        ]
+        if entry.data.get(CONF_SECONDARY_PROVIDER_ENABLED):
+            model_list.append(
+                {
+                    "model_name": secondary_model,
+                    "litellm_params": {
+                        "model": secondary_model,
+                        "api_base": entry.data.get(CONF_SECONDARY_BASE_URL),
+                        "api_key": entry.data.get(CONF_SECONDARY_API_KEY),
+                    },
+                }
+            )
+            fallbacks = [
+                {
+                    primary_model: [secondary_model]
+                }
+            ]
 
-        model_name = entry.data.get(CONF_PRIMARY_CHAT_MODEL)
-        provider = entry.data.get(CONF_PRIMARY_PROVIDER)
-        api_key = entry.data.get(CONF_PRIMARY_API_KEY)
-        base_url = entry.data.get(CONF_PRIMARY_BASE_URL)
+        router = Router(model_list=model_list, fallbacks=fallbacks)
 
         temperature = entry.options.get(CONF_TEMPERATURE, DEFAULT_TEMPERATURE)
         top_p = entry.options.get(CONF_TOP_P, DEFAULT_TOP_P)
@@ -681,11 +716,8 @@ class CustomConversationEntity(
 
         langfuse_params = entry.options.get(CONF_LANGFUSE_SECTION, {})
 
-
         completion_kwargs = {
-            "api_key": api_key,
-            "base_url": base_url,
-            "model": f"{provider}/{model_name}",
+            "model": primary_model,
             "messages": messages,
             "tools": tools,
             "max_tokens": max_tokens,
@@ -707,8 +739,7 @@ class CustomConversationEntity(
             if langfuse_params.get(CONF_LANGFUSE_TRACING_ENABLED)
             else None,
         }
-        if not base_url:
-            completion_kwargs.pop("base_url")
+
         # The "content" field for assistant role messages can be None if it's a tool call, but Google's OpenAI
         # endpoint can't handle this, so we set the content to "Tool Call"
         for message in completion_kwargs["messages"]:
@@ -718,7 +749,7 @@ class CustomConversationEntity(
         try:
             raw_stream: AsyncGenerator[
                 StreamingChatCompletionChunk
-            ] = await acompletion(**completion_kwargs)
+            ] = await router.acompletion(**completion_kwargs)
             langfuse_context.update_current_observation(prompt=prompt)
 
             return _transform_litellm_stream(raw_stream)
