@@ -678,12 +678,14 @@ class CustomConversationEntity(
         )
         generation_id = langfuse_context.get_current_observation_id()
         existing_trace_id = langfuse_context.get_current_trace_id()
+        primary_model = f"{entry.data.get(CONF_PRIMARY_PROVIDER)}/{entry.data.get(CONF_PRIMARY_CHAT_MODEL)}"
+        secondary_model = f"{entry.data.get(CONF_SECONDARY_PROVIDER)}/{entry.data.get(CONF_SECONDARY_CHAT_MODEL)}" if entry.data.get(CONF_SECONDARY_PROVIDER_ENABLED) else ""
         fallbacks = []
         model_list = [
             {
-                "model_name": f"{entry.data.get(CONF_PRIMARY_PROVIDER)}/{entry.data.get(CONF_PRIMARY_CHAT_MODEL)}",
+                "model_name": primary_model,
                 "litellm_params": {
-                    "model": f"{entry.data.get(CONF_PRIMARY_PROVIDER)}/{entry.data.get(CONF_PRIMARY_CHAT_MODEL)}",
+                    "model": primary_model,
                     "api_base": entry.data.get(CONF_PRIMARY_BASE_URL),
                     "api_key": entry.data.get(CONF_PRIMARY_API_KEY),
                 },
@@ -692,9 +694,9 @@ class CustomConversationEntity(
         if entry.data.get(CONF_SECONDARY_PROVIDER_ENABLED):
             model_list.append(
                 {
-                    "model_name": f"{entry.data.get(CONF_SECONDARY_PROVIDER)}/{entry.data.get(CONF_SECONDARY_CHAT_MODEL)}",
+                    "model_name": secondary_model,
                     "litellm_params": {
-                        "model": f"{entry.data.get(CONF_SECONDARY_PROVIDER)}/{entry.data.get(CONF_SECONDARY_CHAT_MODEL)}",
+                        "model": secondary_model,
                         "api_base": entry.data.get(CONF_SECONDARY_BASE_URL),
                         "api_key": entry.data.get(CONF_SECONDARY_API_KEY),
                     },
@@ -702,18 +704,11 @@ class CustomConversationEntity(
             )
             fallbacks = [
                 {
-                    f"{entry.data.get(CONF_PRIMARY_PROVIDER)}/{entry.data.get(CONF_PRIMARY_CHAT_MODEL)}": [
-                        f"{entry.data.get(CONF_SECONDARY_PROVIDER)}/{
-                            entry.data.get(CONF_SECONDARY_CHAT_MODEL)
-                        }"
-                    ]
+                    primary_model: [secondary_model]
                 }
             ]
 
         router = Router(model_list=model_list, fallbacks=fallbacks)
-
-        model_name = entry.data.get(CONF_PRIMARY_CHAT_MODEL)
-        provider = entry.data.get(CONF_PRIMARY_PROVIDER)
 
         temperature = entry.options.get(CONF_TEMPERATURE, DEFAULT_TEMPERATURE)
         top_p = entry.options.get(CONF_TOP_P, DEFAULT_TOP_P)
@@ -722,7 +717,7 @@ class CustomConversationEntity(
         langfuse_params = entry.options.get(CONF_LANGFUSE_SECTION, {})
 
         completion_kwargs = {
-            "model": f"{provider}/{model_name}",
+            "model": primary_model,
             "messages": messages,
             "tools": tools,
             "max_tokens": max_tokens,
