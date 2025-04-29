@@ -119,6 +119,14 @@ openrouter = LiteLLMProvider(
     manual_default_base_url="https://openrouter.ai/api/v1",
 )
 
+mistral = LiteLLMProvider(
+    key="mistral",
+    provider_name="Mistral",
+    model_list_path="/models",
+    supports_custom_base_url=True,
+    manual_default_base_url="https://api.mistral.ai/v1",
+)
+
 ollama = LiteLLMProvider(
     key="ollama",
     provider_name="Ollama",
@@ -135,6 +143,7 @@ SUPPORTED_PROVIDERS = [
     openai,
     gemini,
     openrouter,
+    mistral,
     # ollama, disabled pending litellm fixes for https://github.com/BerriAI/litellm/issues/6135 and https://github.com/BerriAI/litellm/issues/9602
     # ollama_chat
 ]
