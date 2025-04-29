@@ -19,8 +19,8 @@ from custom_components.custom_conversation.const import (
     CONF_PROMPT_BASE,
     CONF_PROMPT_DEVICE_KNOWN_LOCATION,
     CONF_PROMPT_NO_ENABLED_ENTITIES,
-    DOMAIN,
     CONFIG_VERSION,
+    DOMAIN,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
