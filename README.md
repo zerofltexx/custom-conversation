@@ -8,6 +8,8 @@ and experimentation features for those who want to dive deeper into LLM integrat
 
 ### Core Features
 - Compatible with multiple LLM providers, via LiteLLM. See [Supported Providers](docs/supported-providers.md) for the list of supported providers.
+- Configurable LLM Fallback providers - you can use a free low-quota provider as your primary LLM, and fall back to a paid provider (or another free one) if you exceed
+the quota of the first one.
 - Dynamic reconfiguration of API settings (change your base URL without having to create a new instance)
 - Enhanced event system for conversation tracking and debugging
 - Configurable intent handling and fallback behavior
