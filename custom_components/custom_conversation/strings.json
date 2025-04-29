@@ -3,34 +3,44 @@
     "step": {
       "user": {
         "data": {
-          "primary_provider": "LLM Provider"
+          "primary_provider": "LLM Provider",
+          "secondary_provider": "LLM Fallback Provider"
         }
       },
       "credentials": {
         "data": {
           "primary_api_key": "API Key",
-          "primary_base_url": "Base URL"
+          "primary_base_url": "Base URL",
+          "secondary_api_key": "Fallback Provider API Key",
+          "secondary_base_url": "Fallback Provider Base URL"
         }
       },
       "model": {
         "data": {
-          "primary_chat_model": "Model"
+          "primary_chat_model": "Model",
+          "secondary_chat_model": "Fallback Model",
+          "secondary_provider_enabled": "Enable a fallback provider/model in the next step"
         }
       },
       "reconfigure_provider": {
         "data": {
-          "primary_provider": "LLM Provider"
+          "primary_provider": "LLM Provider",
+          "secondary_provider": "LLM Fallback Provider"
         }
       },
       "reconfigure_credentials": {
         "data": {
           "primary_api_key": "API Key",
-          "primary_base_url": "Base URL"
+          "primary_base_url": "Base URL",
+          "secondary_api_key": "Fallback Provider API Key",
+          "secondary_base_url": "Fallback Provider Base URL"
         }
       },
       "reconfigure_model": {
         "data": {
-          "primary_chat_model": "Model"
+          "primary_chat_model": "Model",
+          "secondary_chat_model": "Fallback Model",
+          "secondary_provider_enabled": "Enable a fallback provider/model in the next step"
         }
       }
     },
