@@ -10,6 +10,7 @@ from custom_components.custom_conversation.providers import (
     LiteLLMProvider,
     gemini,
     get_provider,
+    mistral,
     openai,
     openrouter,
 )
@@ -224,6 +225,6 @@ def test_provider_instances():
 
 def test_supported_providers_list():
     """Check if the SUPPORTED_PROVIDERS list contains the expected instances."""
-    expected_providers = [openai, gemini, openrouter]
+    expected_providers = [openai, gemini, openrouter, mistral]
     assert expected_providers == SUPPORTED_PROVIDERS
 
