@@ -24,6 +24,7 @@ from homeassistant.components import assist_pipeline, conversation
 from homeassistant.components.conversation.chat_log import (
     AssistantContent,
     AssistantContentDeltaDict,
+    UserContent,
     async_get_chat_log,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -302,6 +303,18 @@ async def _transform_litellm_stream(
         }
 
 
+async def _remove_failed_hass_agent_messages(
+    content: list[conversation.Content],
+) -> list[conversation.Content]:
+    """Remove failed messages from the HASS agent."""
+    # If the last two messages are AssistantContent followed by UserContent, remove them
+    if len(content) >= 2 and isinstance(content[-1], AssistantContent) and isinstance(
+        content[-2], UserContent
+    ):
+        content = content[:-2]
+    return content
+
+
 class CustomConversationEntity(
     conversation.ConversationEntity, conversation.AbstractConversationAgent
 ):
@@ -454,6 +467,11 @@ class CustomConversationEntity(
                     return conversation.ConversationResult(
                         response=result.response,
                         conversation_id=session.conversation_id,
+                    )
+                # If we're about to call the LLM Agent next, we want to delete the last two messages
+                if options.get(CONF_AGENTS_SECTION, {}).get(CONF_ENABLE_LLM_AGENT):
+                    chat_log.content = await _remove_failed_hass_agent_messages(
+                        chat_log.content
                     )
 
         if options.get(CONF_AGENTS_SECTION, {}).get(CONF_ENABLE_LLM_AGENT):
@@ -679,7 +697,11 @@ class CustomConversationEntity(
         generation_id = langfuse_context.get_current_observation_id()
         existing_trace_id = langfuse_context.get_current_trace_id()
         primary_model = f"{entry.data.get(CONF_PRIMARY_PROVIDER)}/{entry.data.get(CONF_PRIMARY_CHAT_MODEL)}"
-        secondary_model = f"{entry.data.get(CONF_SECONDARY_PROVIDER)}/{entry.data.get(CONF_SECONDARY_CHAT_MODEL)}" if entry.data.get(CONF_SECONDARY_PROVIDER_ENABLED) else ""
+        secondary_model = (
+            f"{entry.data.get(CONF_SECONDARY_PROVIDER)}/{entry.data.get(CONF_SECONDARY_CHAT_MODEL)}"
+            if entry.data.get(CONF_SECONDARY_PROVIDER_ENABLED)
+            else ""
+        )
         fallbacks = []
         model_list = [
             {
@@ -702,11 +724,7 @@ class CustomConversationEntity(
                     },
                 }
             )
-            fallbacks = [
-                {
-                    primary_model: [secondary_model]
-                }
-            ]
+            fallbacks = [{primary_model: [secondary_model]}]
 
         router = Router(model_list=model_list, fallbacks=fallbacks)
 
