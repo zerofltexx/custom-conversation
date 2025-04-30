@@ -307,7 +307,7 @@ async def _remove_failed_hass_agent_messages(
     content: list[conversation.Content],
 ) -> list[conversation.Content]:
     """Remove failed messages from the HASS agent."""
-    # If the last two messages are AgentContent followed by UserContent, remove them
+    # If the last two messages are AssistantContent followed by UserContent, remove them
     if len(content) >= 2 and isinstance(content[-1], AssistantContent) and isinstance(
         content[-2], UserContent
     ):
