@@ -119,7 +119,6 @@ def mock_script(entity_registry, hass):
 def mock_llm_context(mock_assist_device) -> MagicMock:
     """Fixture for a mocked LLMContext."""
     context = MagicMock(spec=llm.LLMContext)
-    context.user_prompt = "Turn on the light"
     context.assistant = "conversation.home_assistant"
     context.language = "en"
     context.device_id = mock_assist_device.id
@@ -302,7 +301,7 @@ async def test_intent_tool_async_call(hass, mock_llm_context, mock_target_device
             platform=mock_llm_context.platform,
             intent_type="HassTurnOn",
             slots=expected_slots,
-            text_input=mock_llm_context.user_prompt,
+            text_input=None,
             context=mock_llm_context.context,
             language=mock_llm_context.language,
             assistant=mock_llm_context.assistant,
