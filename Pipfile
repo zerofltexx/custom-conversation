@@ -11,7 +11,7 @@ mutagen = "*"
 ha-ffmpeg = "*"
 pymicro-vad = "*"
 pyspeex-noise = "*"
-langfuse = "*"
+langfuse = "==2.59.3"
 litellm = "==1.67.2"
 
 [dev-packages]
@@ -19,9 +19,10 @@ pytest = "*"
 pytest-homeassistant-custom-component = "*"
 pytest-cov = "*"
 pytest-asyncio = "*"
-homeassistant = "2025.4.1"
+homeassistant = "2025.7.0"
 python-dotenv = "*"
 pyobjc = {version = "*", sys_platform = "== 'darwin'"}
+dbus-fast = "*"
 
 [requires]
 python_version = "3.13"

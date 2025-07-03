@@ -255,7 +255,7 @@ class IntentTool(llm.Tool):
             platform=llm_context.platform,
             intent_type=self.name,
             slots=slots,
-            text_input=llm_context.user_prompt,
+            text_input=None,
             context=llm_context.context,
             language=llm_context.language,
             assistant=llm_context.assistant,
