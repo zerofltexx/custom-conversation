@@ -19,7 +19,7 @@ pytest = "*"
 pytest-homeassistant-custom-component = "*"
 pytest-cov = "*"
 pytest-asyncio = "*"
-homeassistant = "2025.7.0"
+homeassistant = "2025.8.0b5"
 python-dotenv = "*"
 pyobjc = {version = "*", sys_platform = "== 'darwin'"}
 dbus-fast = "*"
