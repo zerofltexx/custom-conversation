@@ -156,7 +156,7 @@ async def test_custom_llm_api_get_api_instance(custom_llm_api, mock_llm_context,
          patch.object(custom_llm_api, "_async_get_api_prompt", return_value=mock_api_prompt) as mock_get_prompt, \
          patch.object(custom_llm_api, "_async_get_tools", return_value=mock_tools) as mock_get_tools, \
          patch("homeassistant.helpers.llm.APIInstance") as mock_api_instance_cls, \
-         patch("homeassistant.helpers.llm._selector_serializer") as mock_serializer:
+         patch("homeassistant.helpers.llm.selector_serializer") as mock_serializer:
 
         instance = await custom_llm_api.async_get_api_instance(mock_llm_context)
 
