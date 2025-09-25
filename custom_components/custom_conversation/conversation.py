@@ -172,13 +172,13 @@ def _format_tool(
     tool: IntentTool, custom_serializer: Callable[[Any], Any] | None
 ) -> ChatCompletionToolParam:
     """Format tool specification."""
-    tool_spec = {
-        "name": tool.name,
-        "parameters": convert(tool.parameters, custom_serializer=custom_serializer),
-    }
+    function_spec = Function(
+        name=tool.name,
+        parameters=convert(tool.parameters, custom_serializer=custom_serializer),
+    )
     if tool.description:
-        tool_spec["description"] = tool.description
-    return ChatCompletionToolParam(type="function", function=tool_spec)
+        function_spec.description = tool.description
+    return ChatCompletionToolParam(type="function", function=function_spec)
 
 
 def _convert_content_to_param(
